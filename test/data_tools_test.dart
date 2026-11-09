@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:military_maintenance/data/store.dart';
 import 'package:military_maintenance/main.dart';
 import 'package:military_maintenance/ui/data_tools.dart';
+import 'package:military_maintenance/ui/maintenance_loading.dart';
 
 import 'app_test.dart' show mount;
 
@@ -24,7 +25,8 @@ Future<void> tapWithIo(
     );
     final loading =
         find.byType(LinearProgressIndicator).evaluate().isNotEmpty ||
-        find.byType(CircularProgressIndicator).evaluate().isNotEmpty;
+        find.byType(CircularProgressIndicator).evaluate().isNotEmpty ||
+        find.byType(MaintenanceLoading).evaluate().isNotEmpty;
     if (watch.elapsedMilliseconds > 100 &&
         !loading &&
         (completed == null || completed())) {
@@ -325,6 +327,7 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(s.records.length, baseline);
+    expect(s.onboardingCompleted, isTrue);
     expect(find.text('기록과 점검 사진을 복원했습니다. 집계와 예측을 갱신했습니다.'), findsOneWidget);
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox());

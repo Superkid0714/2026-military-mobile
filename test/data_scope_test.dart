@@ -22,7 +22,7 @@ void main() {
     await tester.runAsync(() => s.registerVehicle(registered));
     appRouter.go('/analysis');
     await tester.pumpAndSettle();
-    expect(find.text('조회 대상: 등록 차량 1대 · 합성 고장확률 미적용'), findsOneWidget);
+    expect(find.text('조회 대상: 등록 차량 1대'), findsOneWidget);
     final panel = find.widgetWithText(Panel, '정비 비용 상위 차량');
     await tester.ensureVisible(panel);
     await tester.pumpAndSettle();
@@ -36,7 +36,7 @@ void main() {
     );
   });
 
-  testWidgets('각 업무 화면은 선택한 예제 차량과 등록 차량을 구분한다', (tester) async {
+  testWidgets('각 업무 화면은 선택한 분석용 차량과 등록 차량을 구분한다', (tester) async {
     final s = await setup(tester);
     final mock = s.vehicles.first.id;
     final mockRecord = s.records.firstWhere((r) => r.vehicleId == mock).id;
@@ -57,7 +57,7 @@ void main() {
       appRouter.go(route);
       await tester.pumpAndSettle();
       expect(find.byType(DataScopeNotice), findsWidgets, reason: route);
-      expect(find.textContaining('예제 차량'), findsWidgets, reason: route);
+      expect(find.textContaining('분석용 차량'), findsWidgets, reason: route);
       expect(tester.takeException(), isNull, reason: route);
     }
     await tester.runAsync(() => s.registerVehicle(registered));
@@ -74,11 +74,7 @@ void main() {
     ]) {
       appRouter.go(route);
       await tester.pumpAndSettle();
-      expect(
-        find.text('조회 대상: 등록 차량 1대 · 합성 고장확률 미적용'),
-        findsOneWidget,
-        reason: route,
-      );
+      expect(find.text('조회 대상: 등록 차량 1대'), findsOneWidget, reason: route);
       expect(tester.takeException(), isNull, reason: route);
     }
   });
@@ -89,8 +85,8 @@ void main() {
     await tester.runAsync(() => s.registerVehicle(registered));
     appRouter.go('/vehicles');
     await tester.pumpAndSettle();
-    await tap(tester, find.text('예제 차량 함께 보기'));
-    expect(find.textContaining('등록 차량 1대 · 예제 차량 100대 혼합'), findsOneWidget);
+    await tap(tester, find.text('분석용 차량 함께 보기'));
+    expect(find.textContaining('등록 차량 1대 · 분석용 차량 100대 혼합'), findsOneWidget);
     appRouter.go('/support?vehicle=SCOPE-REAL');
     await tester.pumpAndSettle();
     final field = find.widgetWithText(
@@ -98,7 +94,7 @@ void main() {
       '차량 / 차종',
     );
     await tap(tester, field);
-    final item = find.text('${mock.id} · ${mock.model}');
+    final item = find.text('${mock.id} · ${modelLabel(mock.model)}');
     await tester.scrollUntilVisible(
       item,
       -300,
@@ -112,6 +108,6 @@ void main() {
     );
     tester.widget<ListView>(find.byType(ListView).last).controller!.jumpTo(0);
     await tester.pumpAndSettle();
-    expect(find.text('조회 대상: 예제 차량 1대 · 실사용 자료와 구분'), findsOneWidget);
+    expect(find.text('조회 대상: 분석용 차량 1대'), findsOneWidget);
   });
 }

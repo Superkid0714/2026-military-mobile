@@ -148,7 +148,7 @@ void main() {
     expect(result.remainingDays, isNegative);
     expect(result.firstDue, contains('둘 다 도래'));
     await reveal(tester, find.byKey(const ValueKey('service-as-of')));
-    expect(find.textContaining('선도래 순서 확인 불가'), findsWidgets);
+    expect(find.textContaining('거리와 날짜 중 무엇이 먼저인지'), findsWidgets);
     expect(tester.takeException(), isNull);
     await expectLater(
       find.byType(MilitaryApp),

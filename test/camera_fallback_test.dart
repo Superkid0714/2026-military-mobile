@@ -75,7 +75,7 @@ void main() {
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
     await tester.pumpAndSettle();
     expect(requests, 1);
-    await tap(tester, find.text('카메라 사용 조건 다시 확인'));
+    await tap(tester, find.text('카메라 다시 연결'));
     expect(requests, 2);
     expect(tester.takeException(), isNull);
   });
@@ -157,7 +157,7 @@ void main() {
       find.byWidgetPredicate(
         (w) =>
             w is DropdownButtonFormField<String> &&
-            w.decoration.labelText == '부품 개념 선택',
+            w.decoration.labelText == '부품 이름 선택',
       ),
     );
     await tester.tap(find.text('시험필터').last);

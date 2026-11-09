@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:military_maintenance/data/store.dart';
 import 'package:military_maintenance/main.dart';
+import 'package:military_maintenance/ui/components.dart' show modelLabel;
 
 import 'app_test.dart' show mount;
 import 'data_tools_test.dart' show tapWithIo;
@@ -48,14 +49,18 @@ Future<void> tap(WidgetTester tester, Finder finder) async {
 Future<void> dismissNotifications(WidgetTester tester) async {
   // SnackBarAction's animation completion is scheduled in tapWithIo's real
   // async zone. Flush it while the messenger is still mounted.
-  await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 1)));
+  await tester.runAsync(
+    () => Future<void>.delayed(const Duration(milliseconds: 1)),
+  );
   final messenger = tester.state<ScaffoldMessengerState>(
     find.byType(ScaffoldMessenger).first,
   );
   messenger.clearSnackBars();
   messenger.removeCurrentSnackBar();
   await tester.pumpAndSettle();
-  await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 1)));
+  await tester.runAsync(
+    () => Future<void>.delayed(const Duration(milliseconds: 1)),
+  );
 }
 
 MaintenanceEvidence doc(Vehicle v, String id) => MaintenanceEvidence(
@@ -75,7 +80,7 @@ void main() {
     s.supportLibrary = SupportLibrary(evidence: [doc(v, 'DOC')]);
     appRouter.go('/support?vehicle=${v.id}');
     await tester.pumpAndSettle();
-    expect(find.textContaining('자동 답변 미연결'), findsOneWidget);
+    expect(find.text('차량과 부품 고르기'), findsOneWidget);
     await tester.enterText(
       find.byKey(const ValueKey('support-query')),
       '시동이 걸리지 않아요',
@@ -277,7 +282,7 @@ void main() {
     );
     await tester.pumpAndSettle();
     await tap(tester, find.text('차량 상세'));
-    await tap(tester, find.widgetWithText(OutlinedButton, 'AI 정비지원'));
+    await tap(tester, find.widgetWithText(OutlinedButton, '부품별 정비'));
     expect(
       tester
           .widget<TextField>(find.byKey(const ValueKey('support-query')))
@@ -294,7 +299,7 @@ void main() {
     expect(savedOffset, greaterThan(0));
     appRouter.go('/vehicles/${v.id}');
     await tester.pumpAndSettle();
-    await tap(tester, find.widgetWithText(OutlinedButton, 'AI 정비지원'));
+    await tap(tester, find.widgetWithText(OutlinedButton, '부품별 정비'));
     final list = tester.widget<ListView>(find.byType(ListView).last);
     expect(list.controller!.offset, closeTo(savedOffset, 2));
   });
@@ -308,7 +313,12 @@ void main() {
     final v = s.vehicles.first;
     await tap(
       tester,
-      find.widgetWithText(SimpleDialogOption, '${v.id} · ${v.model}').first,
+      find
+          .widgetWithText(
+            SimpleDialogOption,
+            '${v.id} · ${modelLabel(v.model)}',
+          )
+          .first,
     );
     expect(find.text('${v.id} 정비 주기 등록'), findsOneWidget);
   });

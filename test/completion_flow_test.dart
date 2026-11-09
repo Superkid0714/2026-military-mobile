@@ -9,9 +9,9 @@ import 'ui_usability_test.dart' show setup, tap, reveal;
 import 'data_tools_test.dart' show tapWithIo;
 
 void main() {
-  testWidgets('실사용 준비부터 점검·교환 완료·다음 계획·사진 조회까지 연결한다', (tester) async {
+  testWidgets('초기 설정부터 점검·교환 완료·다음 계획·사진 조회까지 연결한다', (tester) async {
     final s = await setup(tester, size: const Size(1280, 960));
-    await tap(tester, find.text('실사용 준비·차량 등록'));
+    await tap(tester, find.text('초기 설정·차량 등록'));
     await tap(tester, find.widgetWithText(FilledButton, '차량 등록'));
     for (final e in {
       '차량번호': 'FLOW-REAL-1',
@@ -35,7 +35,7 @@ void main() {
     await tap(tester, find.text('정비 근거 등록'));
     for (final e in {
       '표준부품명': '엔진오일',
-      '증상 키워드': '교환',
+      '증상 설명': '교환',
       '문서명·개정판': '가상 시험 지침',
       '원문 위치(쪽·절)': '1쪽',
       '원문 구간': '사용 흐름 시험용 원문입니다.',
@@ -144,7 +144,7 @@ void main() {
   });
 
   for (final size in [const Size(600, 800), const Size(800, 1280)]) {
-    testWidgets('실사용 준비·차량 등록 배치 ${size.width}×${size.height}', (tester) async {
+    testWidgets('초기 설정·차량 등록 배치 ${size.width}×${size.height}', (tester) async {
       await setup(tester, size: size);
       tester.platformDispatcher.textScaleFactorTestValue = 1.4;
       addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);

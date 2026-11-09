@@ -1,0 +1,494 @@
+{
+  "format": "synthetic-service-scenarios-v1",
+  "isSynthetic": true,
+  "asOf": "2026-11-04",
+  "assumptions": [
+    "모든 식별값·수치·정비 내용은 새로 작성한 시뮬레이션 자료",
+    "10,000km 주기는 순서 검사에만 사용하는 가정으로 제조사 정비 기준이 아님",
+    "실제 모델 점수는 실행 결과를 기록하며 원하는 값으로 지정하지 않음"
+  ],
+  "cases": [
+    {
+      "id": "MOCK-SCENARIO-01",
+      "name": "출고 초기·저운행",
+      "vehicle": {
+        "id": "MOCK-SCENARIO-01",
+        "model": "렉스턴 스포츠",
+        "year": 2026,
+        "distance": 6500,
+        "hours": 170,
+        "fuel": 650,
+        "risk": 0
+      },
+      "operations": [
+        {
+          "vehicleId": "MOCK-SCENARIO-01",
+          "created": "2026-09-30T18:00:00",
+          "distance": 5800,
+          "hours": 150,
+          "fuel": 580
+        },
+        {
+          "vehicleId": "MOCK-SCENARIO-01",
+          "created": "2026-10-31T18:00:00",
+          "distance": 6500,
+          "hours": 170,
+          "fuel": 650
+        }
+      ],
+      "maintenance": [],
+      "rules": [
+        {
+          "id": "RULE-1",
+          "vehicleId": "MOCK-SCENARIO-01",
+          "part": "엔진오일",
+          "intervalKm": 10000,
+          "baselineKm": 5000,
+          "baselineDate": "2026-06-01",
+          "source": "시나리오 검증용 가정"
+        }
+      ],
+      "expected": {
+        "predictionReady": true,
+        "firstPart": "차량 종합 점검",
+        "orders": [
+          2,
+          3
+        ]
+      }
+    },
+    {
+      "id": "MOCK-SCENARIO-02",
+      "name": "일반적인 운용",
+      "vehicle": {
+        "id": "MOCK-SCENARIO-02",
+        "model": "렉스턴 스포츠",
+        "year": 2022,
+        "distance": 68000,
+        "hours": 1700,
+        "fuel": 7100,
+        "risk": 0
+      },
+      "operations": [
+        {
+          "vehicleId": "MOCK-SCENARIO-02",
+          "created": "2026-09-30T18:00:00",
+          "distance": 66500,
+          "hours": 1660,
+          "fuel": 6940
+        },
+        {
+          "vehicleId": "MOCK-SCENARIO-02",
+          "created": "2026-10-31T18:00:00",
+          "distance": 68000,
+          "hours": 1700,
+          "fuel": 7100
+        }
+      ],
+      "maintenance": [],
+      "rules": [
+        {
+          "id": "RULE-2",
+          "vehicleId": "MOCK-SCENARIO-02",
+          "part": "엔진오일",
+          "intervalKm": 10000,
+          "baselineKm": 62000,
+          "baselineDate": "2026-06-01",
+          "source": "시나리오 검증용 가정"
+        }
+      ],
+      "expected": {
+        "predictionReady": true,
+        "firstPart": "차량 종합 점검",
+        "orders": [
+          2,
+          3
+        ]
+      }
+    },
+    {
+      "id": "MOCK-SCENARIO-03",
+      "name": "고주행·교환 이력 있음",
+      "vehicle": {
+        "id": "MOCK-SCENARIO-03",
+        "model": "렉스턴 스포츠",
+        "year": 2018,
+        "distance": 205000,
+        "hours": 5600,
+        "fuel": 22500,
+        "risk": 0
+      },
+      "operations": [
+        {
+          "vehicleId": "MOCK-SCENARIO-03",
+          "created": "2026-09-30T18:00:00",
+          "distance": 202800,
+          "hours": 5540,
+          "fuel": 22240
+        },
+        {
+          "vehicleId": "MOCK-SCENARIO-03",
+          "created": "2026-10-31T18:00:00",
+          "distance": 205000,
+          "hours": 5600,
+          "fuel": 22500
+        }
+      ],
+      "maintenance": [],
+      "rules": [
+        {
+          "id": "RULE-3",
+          "vehicleId": "MOCK-SCENARIO-03",
+          "part": "엔진오일",
+          "intervalKm": 10000,
+          "baselineKm": 198000,
+          "baselineDate": "2026-06-01",
+          "source": "시나리오 검증용 가정"
+        }
+      ],
+      "expected": {
+        "predictionReady": true,
+        "firstPart": "차량 종합 점검",
+        "orders": [
+          2,
+          3
+        ]
+      }
+    },
+    {
+      "id": "MOCK-SCENARIO-04",
+      "name": "장기 사용·저운행",
+      "vehicle": {
+        "id": "MOCK-SCENARIO-04",
+        "model": "렉스턴 스포츠",
+        "year": 2014,
+        "distance": 48000,
+        "hours": 1500,
+        "fuel": 5600,
+        "risk": 0
+      },
+      "operations": [
+        {
+          "vehicleId": "MOCK-SCENARIO-04",
+          "created": "2026-09-30T18:00:00",
+          "distance": 47700,
+          "hours": 1488,
+          "fuel": 5558
+        },
+        {
+          "vehicleId": "MOCK-SCENARIO-04",
+          "created": "2026-10-31T18:00:00",
+          "distance": 48000,
+          "hours": 1500,
+          "fuel": 5600
+        }
+      ],
+      "maintenance": [],
+      "rules": [],
+      "expected": {
+        "predictionReady": true,
+        "firstPart": "차량 종합 점검",
+        "orders": [
+          2
+        ]
+      }
+    },
+    {
+      "id": "MOCK-SCENARIO-05",
+      "name": "최근 운행량 많음",
+      "vehicle": {
+        "id": "MOCK-SCENARIO-05",
+        "model": "렉스턴 스포츠",
+        "year": 2021,
+        "distance": 145000,
+        "hours": 3900,
+        "fuel": 16500,
+        "risk": 0
+      },
+      "operations": [
+        {
+          "vehicleId": "MOCK-SCENARIO-05",
+          "created": "2026-09-30T18:00:00",
+          "distance": 140800,
+          "hours": 3760,
+          "fuel": 15950
+        },
+        {
+          "vehicleId": "MOCK-SCENARIO-05",
+          "created": "2026-10-31T18:00:00",
+          "distance": 145000,
+          "hours": 3900,
+          "fuel": 16500
+        }
+      ],
+      "maintenance": [],
+      "rules": [],
+      "expected": {
+        "predictionReady": true,
+        "firstPart": "차량 종합 점검",
+        "orders": [
+          2
+        ]
+      }
+    },
+    {
+      "id": "MOCK-SCENARIO-06",
+      "name": "같은 제동 부품 반복 수리",
+      "vehicle": {
+        "id": "MOCK-SCENARIO-06",
+        "model": "렉스턴 스포츠",
+        "year": 2020,
+        "distance": 125000,
+        "hours": 3400,
+        "fuel": 14500,
+        "risk": 0
+      },
+      "operations": [
+        {
+          "vehicleId": "MOCK-SCENARIO-06",
+          "created": "2026-09-30T18:00:00",
+          "distance": 123300,
+          "hours": 3350,
+          "fuel": 14290
+        },
+        {
+          "vehicleId": "MOCK-SCENARIO-06",
+          "created": "2026-10-31T18:00:00",
+          "distance": 125000,
+          "hours": 3400,
+          "fuel": 14500
+        }
+      ],
+      "maintenance": [
+        {
+          "id": "MR-6-0",
+          "vehicleId": "MOCK-SCENARIO-06",
+          "date": "2026-09-10",
+          "part": "브레이크 패드",
+          "system": "제동",
+          "description": "제동 시 소음과 편마모 점검 및 수리",
+          "cost": 120000,
+          "maintenanceType": "고장수리"
+        },
+        {
+          "id": "MR-6-1",
+          "vehicleId": "MOCK-SCENARIO-06",
+          "date": "2026-10-20",
+          "part": "브레이크 패드",
+          "system": "제동",
+          "description": "같은 부위 소음 재발로 재점검 및 수리",
+          "cost": 90000,
+          "maintenanceType": "고장수리"
+        }
+      ],
+      "rules": [],
+      "expected": {
+        "predictionReady": true,
+        "firstPart": "브레이크패드",
+        "orders": [
+          1,
+          2
+        ]
+      }
+    },
+    {
+      "id": "MOCK-SCENARIO-07",
+      "name": "확인된 오일 주기 도래",
+      "vehicle": {
+        "id": "MOCK-SCENARIO-07",
+        "model": "렉스턴 스포츠",
+        "year": 2021,
+        "distance": 72000,
+        "hours": 1900,
+        "fuel": 8100,
+        "risk": 0
+      },
+      "operations": [
+        {
+          "vehicleId": "MOCK-SCENARIO-07",
+          "created": "2026-09-30T18:00:00",
+          "distance": 70200,
+          "hours": 1850,
+          "fuel": 7890
+        },
+        {
+          "vehicleId": "MOCK-SCENARIO-07",
+          "created": "2026-10-31T18:00:00",
+          "distance": 72000,
+          "hours": 1900,
+          "fuel": 8100
+        }
+      ],
+      "maintenance": [],
+      "rules": [
+        {
+          "id": "RULE-7",
+          "vehicleId": "MOCK-SCENARIO-07",
+          "part": "엔진오일",
+          "intervalKm": 10000,
+          "baselineKm": 60000,
+          "baselineDate": "2026-06-01",
+          "source": "시나리오 검증용 가정"
+        }
+      ],
+      "expected": {
+        "predictionReady": true,
+        "firstPart": "엔진오일",
+        "orders": [
+          0,
+          2
+        ]
+      }
+    },
+    {
+      "id": "MOCK-SCENARIO-08",
+      "name": "주기 도래와 반복 수리 동시 발생",
+      "vehicle": {
+        "id": "MOCK-SCENARIO-08",
+        "model": "렉스턴 스포츠",
+        "year": 2017,
+        "distance": 190000,
+        "hours": 5400,
+        "fuel": 22500,
+        "risk": 0
+      },
+      "operations": [
+        {
+          "vehicleId": "MOCK-SCENARIO-08",
+          "created": "2026-09-30T18:00:00",
+          "distance": 187500,
+          "hours": 5325,
+          "fuel": 22160
+        },
+        {
+          "vehicleId": "MOCK-SCENARIO-08",
+          "created": "2026-10-31T18:00:00",
+          "distance": 190000,
+          "hours": 5400,
+          "fuel": 22500
+        }
+      ],
+      "maintenance": [
+        {
+          "id": "MR-8-0",
+          "vehicleId": "MOCK-SCENARIO-08",
+          "date": "2026-09-15",
+          "part": "냉각수 호스",
+          "system": "냉각",
+          "description": "호스 연결부 냉각수 누수 점검 및 수리",
+          "cost": 180000,
+          "maintenanceType": "고장수리"
+        },
+        {
+          "id": "MR-8-1",
+          "vehicleId": "MOCK-SCENARIO-08",
+          "date": "2026-10-25",
+          "part": "냉각수 호스",
+          "system": "냉각",
+          "description": "같은 연결부 누수 재발 점검 및 수리",
+          "cost": 110000,
+          "maintenanceType": "고장수리"
+        }
+      ],
+      "rules": [
+        {
+          "id": "RULE-8",
+          "vehicleId": "MOCK-SCENARIO-08",
+          "part": "엔진오일",
+          "intervalKm": 10000,
+          "baselineKm": 178000,
+          "baselineDate": "2026-06-01",
+          "source": "시나리오 검증용 가정"
+        }
+      ],
+      "expected": {
+        "predictionReady": true,
+        "firstPart": "엔진오일",
+        "orders": [
+          0,
+          1,
+          2
+        ]
+      }
+    },
+    {
+      "id": "MOCK-SCENARIO-09",
+      "name": "누적 운용값만 있는 차량",
+      "vehicle": {
+        "id": "MOCK-SCENARIO-09",
+        "model": "렉스턴 스포츠",
+        "year": 2019,
+        "distance": 103000,
+        "hours": 2800,
+        "fuel": 12000,
+        "risk": 0
+      },
+      "operations": [
+        {
+          "vehicleId": "MOCK-SCENARIO-09",
+          "created": "2026-10-31T18:00:00",
+          "distance": 103000,
+          "hours": 2800,
+          "fuel": 12000
+        }
+      ],
+      "maintenance": [],
+      "rules": [
+        {
+          "id": "RULE-9",
+          "vehicleId": "MOCK-SCENARIO-09",
+          "part": "엔진오일",
+          "intervalKm": 10000,
+          "baselineKm": 90000,
+          "baselineDate": "2026-06-01",
+          "source": "시나리오 검증용 가정"
+        }
+      ],
+      "expected": {
+        "predictionReady": false,
+        "firstPart": "엔진오일",
+        "orders": [
+          0
+        ]
+      }
+    },
+    {
+      "id": "MOCK-SCENARIO-10",
+      "name": "누적 주행거리 역전 입력",
+      "vehicle": {
+        "id": "MOCK-SCENARIO-10",
+        "model": "렉스턴 스포츠",
+        "year": 2020,
+        "distance": 95000,
+        "hours": 2600,
+        "fuel": 11000,
+        "risk": 0
+      },
+      "operations": [
+        {
+          "vehicleId": "MOCK-SCENARIO-10",
+          "created": "2026-09-30T18:00:00",
+          "distance": 96000,
+          "hours": 2555,
+          "fuel": 10810
+        },
+        {
+          "vehicleId": "MOCK-SCENARIO-10",
+          "created": "2026-10-31T18:00:00",
+          "distance": 95000,
+          "hours": 2600,
+          "fuel": 11000
+        }
+      ],
+      "maintenance": [],
+      "rules": [],
+      "expected": {
+        "predictionReady": false,
+        "firstPart": "점검 기준 확인",
+        "orders": [
+          3
+        ]
+      }
+    }
+  ]
+}

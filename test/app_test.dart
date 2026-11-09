@@ -4,10 +4,15 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:military_maintenance/data/store.dart';
+import 'package:military_maintenance/data/adaptive_runtime.dart';
 import 'package:military_maintenance/data/clock.dart';
 import 'package:military_maintenance/main.dart';
 
-Future<AppStore> mount(WidgetTester tester, Size size) async {
+Future<AppStore> mount(
+  WidgetTester tester,
+  Size size, {
+  AdaptiveRuntime? runtime,
+}) async {
   tester.view.physicalSize = size;
   tester.view.devicePixelRatio = 1;
   final font = FontLoader('NotoSansKR')
@@ -19,6 +24,7 @@ Future<AppStore> mount(WidgetTester tester, Size size) async {
   final store = AppStore(clock: () => DateTime(2026, 10, 9, 12));
   await tester.runAsync(() async {
     await store.initialize(database: LocalDatabase(NativeDatabase.memory()));
+    await store.completeOnboarding();
   });
   expect(store.error, isNull, reason: store.initializationCause?.toString());
   appRouter.go('/');
@@ -26,6 +32,8 @@ Future<AppStore> mount(WidgetTester tester, Size size) async {
     ProviderScope(
       overrides: [
         storeProvider.overrideWith((ref) => store),
+        if (runtime != null)
+          adaptiveRuntimeProvider.overrideWith((ref) => runtime),
         currentTimeProvider.overrideWith((ref) => DateTime(2026, 10, 9)),
       ],
       child: const MilitaryApp(),
@@ -67,12 +75,12 @@ void main() {
     appRouter.go('/support?vehicle=MOCK-RX-0001&part=brake_pad');
     await tester.pumpAndSettle();
     // Route parameters use the same standard vocabulary as image/record results.
-    expect(find.text('정비 문서 근거'), findsOneWidget);
+    expect(find.text('관련 책자'), findsOneWidget);
     await revealWidget(tester, find.text('근거 등록'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('근거 등록'));
     await tester.pumpAndSettle();
-    await tester.enterText(find.byKey(const ValueKey('증상 키워드')), '제동 소음');
+    await tester.enterText(find.byKey(const ValueKey('증상 설명')), '제동 소음');
     await tester.enterText(find.byKey(const ValueKey('문서명·개정판')), '테스트 정비 지침');
     await tester.enterText(find.byKey(const ValueKey('원문 위치(쪽·절)')), '3쪽 2절');
     await tester.enterText(find.byKey(const ValueKey('원문 구간')), '테스트용 원문입니다.');
@@ -201,7 +209,7 @@ void main() {
       '가상 점검에서 제동 압력 점검 이상 확인. 브레이크 호스 교환 후 작동 상태를 재점검함.',
     );
     await tester.pumpAndSettle();
-    expect(find.textContaining('목업 분류 제안: 제동 · 고장수리'), findsOneWidget);
+    expect(find.textContaining('AI 분류 제안: 제동 · 고장수리'), findsOneWidget);
     await tester.ensureVisible(find.text('분류 제안 적용'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('분류 제안 적용'));

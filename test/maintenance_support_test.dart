@@ -159,6 +159,33 @@ void main() {
     expect(s.searchEvidence(vehicle.id, '엔진오일', '없는증상'), isEmpty);
   });
 
+  test('공통 단어가 많은 페이지보다 구체 부품 설명과 제목을 우선 검색한다', () {
+    MaintenanceEvidence source(String id, String title, String text) =>
+        MaintenanceEvidence(
+          id: id,
+          model: vehicle.model,
+          part: '엔진오일',
+          symptoms: '',
+          title: title,
+          location: '가상 1쪽',
+          text: text,
+        );
+    final docs = [
+      for (var i = 0; i < 8; i++)
+        source('GENERAL-$i', '일반 점검', '${'엔진 오일 점검 안내. ' * 30}압력 스위치 점검.'),
+      source('SPECIFIC', '오일 압력 스위치', '오일압력스위치는 필터 모듈 위에 부착된다.'),
+    ];
+    final s = sample()..supportLibrary = SupportLibrary(evidence: docs);
+    expect(
+      s.searchEvidence(vehicle.id, '엔진오일', '오일 압력 스위치는 어디에 부착되나요').first.id,
+      'SPECIFIC',
+    );
+    expect(
+      s.searchEvidence(vehicle.id, '엔진오일', '오일압력스위치').first.id,
+      'SPECIFIC',
+    );
+  });
+
   test('교환 기준일 당일의 미확인 정비는 순서를 추정하지 않고 보류한다', () {
     final s = sample();
     Maintenance unknown(String id, String date, {String part = 'engine_oil'}) =>

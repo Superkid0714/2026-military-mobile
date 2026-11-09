@@ -8,23 +8,31 @@ import 'ui_usability_test.dart' show setup, tap;
 
 void main() {
   testWidgets('예제 시작과 합성 분석을 분리하고 준비·업무 동선을 제공한다', (tester) async {
-    await setup(tester);
-    expect(find.textContaining('예제 데이터 보기'), findsOneWidget);
-    expect(find.text('예제 차량'), findsOneWidget);
-    expect(find.byType(StatusRing), findsNothing);
+    final s = await setup(tester);
+    await tester.runAsync(s.loadPresentationFleet);
+    await tester.pumpAndSettle();
+    expect(find.text('운용 예시 12대'), findsOneWidget);
+    expect(find.text('다음 점검'), findsOneWidget);
+    expect(find.text('정비 분석 보기'), findsOneWidget);
+    expect(find.byType(Bars), findsNothing);
     await expectLater(
       find.byType(MilitaryApp),
       matchesGoldenFile('goldens/workflow_home_demo_1280x800.png'),
     );
-    await tap(tester, find.text('실사용 준비·차량 등록'));
+    await tap(tester, find.text('초기 설정·차량 등록'));
     expect(find.text('준비 상태'), findsOneWidget);
     expect(find.text('차량 등록 미등록'), findsOneWidget);
     expect(find.text('정비 근거 미등록'), findsOneWidget);
     expect(find.text('정비 주기 미등록'), findsOneWidget);
     appRouter.go('/');
     await tester.pumpAndSettle();
-    await tap(tester, find.text('예제 분석 보기'));
-    expect(find.byType(StatusRing), findsOneWidget);
+    await tap(tester, find.text('등록 차량 0대'));
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 150)),
+    );
+    await tester.pumpAndSettle();
+    expect(s.dashboardVehicles, isEmpty);
+    expect(find.widgetWithText(FilledButton, '차량 등록'), findsOneWidget);
   });
 
   testWidgets('실제 등록 차량의 주기 도달·기준 확인·미등록을 구분하고 작업 대상을 연결한다', (tester) async {
@@ -80,12 +88,11 @@ void main() {
       );
     });
     await tester.pumpAndSettle();
-    expect(find.textContaining('등록 차량 2대 기준'), findsOneWidget);
-    expect(find.text('2대'), findsOneWidget);
-    expect(find.text('1항목'), findsNWidgets(2));
-    expect(find.text('1대'), findsOneWidget);
+    expect(find.text('차량 2대'), findsOneWidget);
+    expect(find.text('지금 점검 1건'), findsOneWidget);
+    expect(find.text('기준 확인 필요'), findsOneWidget);
     expect(find.byType(StatusRing), findsNothing);
-    expect(find.text('낮음'), findsNothing);
+
     await expectLater(
       find.byType(MilitaryApp),
       matchesGoldenFile('goldens/workflow_home_registered_1280x960.png'),
@@ -124,7 +131,13 @@ void main() {
     addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
-    await tap(tester, find.widgetWithText(OutlinedButton, 'AI 정비지원'));
+    await tap(tester, find.widgetWithText(FilledButton, '차량 사진 점검'));
+    expect(find.text('차량 상태 지도'), findsOneWidget);
+    expect(find.text('전면 사진 찍기'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    appRouter.go('/');
+    await tester.pumpAndSettle();
+    await tap(tester, find.widgetWithText(OutlinedButton, '부품별 정비'));
     expect(appRouter.routeInformationProvider.value.uri.path, '/support');
     expect(tester.takeException(), isNull);
   });

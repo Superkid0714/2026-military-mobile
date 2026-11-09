@@ -40,6 +40,44 @@ Future<void> chooseStatus(WidgetTester tester, String label) async {
 }
 
 void main() {
+  testWidgets('분석용 기록은 정리된 문구를 표시하고 가격만 수정하면 원문을 보존한다', (tester) async {
+    final s = await setup(tester, size: const Size(1280, 960));
+    final original = s.records.firstWhere(
+      (r) => r.description.startsWith('목업 기록: '),
+    );
+    appRouter.go('/entry?record=${original.id}');
+    await tester.pumpAndSettle();
+    final fields = tester.widgetList<TextFormField>(find.byType(TextFormField));
+    expect(
+      fields.any((f) => f.controller?.text == original.description),
+      isFalse,
+    );
+    expect(
+      fields.any(
+        (f) =>
+            f.controller?.text ==
+            original.description.replaceFirst('목업 기록: ', ''),
+      ),
+      isTrue,
+    );
+    await tester.enterText(
+      find.byKey(const ValueKey('가격(원)')),
+      '${original.cost + 1}',
+    );
+    await reveal(tester, find.text('저장'));
+    await tapWithIo(
+      tester,
+      find.text('저장'),
+      completed: () => s.records.any(
+        (r) => r.id == original.id && r.cost == original.cost + 1,
+      ),
+    );
+    expect(
+      s.records.singleWhere((r) => r.id == original.id).description,
+      original.description,
+    );
+    expect(tester.takeException(), isNull);
+  });
   for (final state in <bool?>[null, false, true]) {
     testWidgets(
       '${replacementStatusLabel(state)} 기록에서 교환 여부를 건드리지 않은 수정은 DB 재조회 후에도 유지된다',

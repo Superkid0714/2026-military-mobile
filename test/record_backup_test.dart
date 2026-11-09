@@ -5,6 +5,7 @@ import 'package:drift/native.dart';
 import 'package:drift/drift.dart' show Variable;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:military_maintenance/data/store.dart';
+import 'package:military_maintenance/data/front_inspection.dart';
 import 'package:military_maintenance/data/local_models.dart';
 
 Future<AppStore> createStore([File? file]) async {
@@ -237,6 +238,10 @@ void main() {
         created: '2026-10-09T12:00:00',
         imagePath: photo.path,
         note: '가상 메모',
+        front: const {
+          FrontPart.leftLamp: FrontObservation(FrontCheck.review, x: .78, y: .42),
+          FrontPart.bumper: FrontObservation(FrontCheck.hidden),
+        },
       ),
     );
     final backup = File('${dir.path}/snapshot.mbackup');
@@ -262,12 +267,16 @@ void main() {
     expect(s.records.any((r) => r.id == removed), isFalse);
     final restoredPhoto = s.inspections.single;
     expect(restoredPhoto.imagePath, isNot(photo.path));
+    expect(restoredPhoto.front[FrontPart.leftLamp]?.x, .78);
+    expect(restoredPhoto.front[FrontPart.bumper]?.status, FrontCheck.hidden);
     expect(await File(restoredPhoto.imagePath).readAsBytes(), bytes);
     expect(s.questions.single['question'], '가상 질문');
     final count = s.records.length;
     await s.db!.close();
     final reopened = await createStore(db);
     expect(reopened.records.length, count);
+    expect(reopened.inspections.single.front[FrontPart.leftLamp]?.status,
+        FrontCheck.review);
     expect(reopened.vehicle(vid).distance, old.distance + 1500);
     expect(
       await File(reopened.inspections.single.imagePath).readAsBytes(),

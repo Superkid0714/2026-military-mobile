@@ -172,10 +172,10 @@ void main() {
         ),
       ),
     );
-    expect(find.textContaining('RAM 4.00 GiB'), findsOneWidget);
-    expect(find.textContaining('retrieval_only'), findsOneWidget);
-    expect(find.textContaining('실측 전 미확정'), findsOneWidget);
-    expect(find.textContaining('미등록'), findsOneWidget);
+    expect(find.textContaining('메모리 4.00 GiB'), findsOneWidget);
+    expect(find.textContaining('추가 문장 정리 사용 안 함'), findsOneWidget);
+    expect(find.textContaining('남은 정비거리는 등록한 주기'), findsOneWidget);
+    expect(find.textContaining('추가된 책자·사진 분석 자료가 없습니다.'), findsOneWidget);
     await tester.tap(find.byType(DropdownButtonFormField<String>));
     await tester.pumpAndSettle();
     expect(find.text('확장'), findsNothing);

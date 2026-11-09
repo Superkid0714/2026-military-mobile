@@ -71,7 +71,7 @@ void main() {
       find.byWidgetPredicate(
         (w) =>
             w is DropdownButtonFormField<String> &&
-            w.decoration.labelText == '부품 개념 수동 선택',
+            w.decoration.labelText == '부품 이름 수동 선택',
       ),
     );
     await tester.tap(find.text('시험필터').last);

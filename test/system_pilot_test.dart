@@ -103,7 +103,7 @@ void main() {
       'unavailable',
     );
   });
-  testWidgets('계통 제안은 표시만 하고 사용자 선택 전에는 필드를 바꾸지 않는다', (tester) async {
+  testWidgets('정비 종류 제안은 표시만 하고 사용자 선택 전에는 필드를 바꾸지 않는다', (tester) async {
     providerOwnsRuntime = true;
     final applied = <String>[];
     await tester.pumpWidget(
@@ -122,7 +122,7 @@ void main() {
         ),
       ),
     );
-    expect(find.textContaining('단일 AI 라벨 초안'), findsOneWidget);
+    expect(find.textContaining('입력한 정비 내용을 보고'), findsOneWidget);
     await tapWithIo(
       tester,
       find.byKey(const ValueKey('system-pilot-run')),
