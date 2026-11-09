@@ -43,6 +43,40 @@ object VisionFiles {
     }
 }
 
+internal fun <T> withVisionBitmap(
+    context: Context, file: File, maxEdge: Int, useBitmap: (Bitmap) -> T
+): T {
+    require(file.canonicalPath.startsWith(File(context.applicationInfo.dataDir).canonicalPath + File.separator))
+    require(file.isFile && file.length() in 1..(32L * 1024 * 1024))
+    val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    BitmapFactory.decodeFile(file.path, options)
+    require(options.outWidth in 1..20000 && options.outHeight in 1..20000)
+    options.inSampleSize = 1
+    while (maxOf(options.outWidth, options.outHeight) / options.inSampleSize > maxEdge) options.inSampleSize *= 2
+    options.inJustDecodeBounds = false
+    options.inPreferredConfig = Bitmap.Config.ARGB_8888
+    val decoded = requireNotNull(BitmapFactory.decodeFile(file.path, options))
+    var oriented = decoded
+    try {
+        val orientation = try { ExifInterface(file.path).getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL) } catch (_: Exception) { 1 }
+        val matrix = Matrix()
+        when (orientation) {
+            2 -> matrix.setScale(-1f, 1f)
+            3 -> matrix.setRotate(180f)
+            4 -> matrix.setScale(1f, -1f)
+            5 -> { matrix.setRotate(90f); matrix.postScale(-1f, 1f) }
+            6 -> matrix.setRotate(90f)
+            7 -> { matrix.setRotate(270f); matrix.postScale(-1f, 1f) }
+            8 -> matrix.setRotate(270f)
+        }
+        if (!matrix.isIdentity) oriented = Bitmap.createBitmap(decoded, 0, 0, decoded.width, decoded.height, matrix, false)
+        return useBitmap(oriented)
+    } finally {
+        if (oriented !== decoded) oriented.recycle()
+        decoded.recycle()
+    }
+}
+
 /** Public COCO model execution test. No military images or part-performance claim. */
 class OnnxVisionSession(private val context: Context, threads: Int) : NativeModelSession {
     private val environment = OrtEnvironment.getEnvironment()
@@ -55,39 +89,14 @@ class OnnxVisionSession(private val context: Context, threads: Int) : NativeMode
             environment.createSession(VisionFiles.active(context).path, options)
         }
     }
-    private fun pixels(file: File): ByteArray {
-        require(file.canonicalPath.startsWith(File(context.applicationInfo.dataDir).canonicalPath + File.separator))
-        require(file.isFile && file.length() in 1..(32L * 1024 * 1024))
-        val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        BitmapFactory.decodeFile(file.path, options)
-        require(options.outWidth in 1..20000 && options.outHeight in 1..20000)
-        options.inSampleSize = 1
-        while (maxOf(options.outWidth, options.outHeight) / options.inSampleSize > 600) options.inSampleSize *= 2
-        options.inJustDecodeBounds = false
-        options.inPreferredConfig = Bitmap.Config.ARGB_8888
-        val decoded = requireNotNull(BitmapFactory.decodeFile(file.path, options))
-        var oriented = decoded
+    private fun pixels(file: File): ByteArray = withVisionBitmap(context, file, 600) { oriented ->
+        val scaled = Bitmap.createScaledBitmap(oriented, 300, 300, false)
         try {
-            val orientation = try { ExifInterface(file.path).getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL) } catch (_: Exception) { 1 }
-            val matrix = Matrix()
-            when (orientation) {
-                2 -> matrix.setScale(-1f, 1f)
-                3 -> matrix.setRotate(180f)
-                4 -> matrix.setScale(1f, -1f)
-                5 -> { matrix.setRotate(90f); matrix.postScale(-1f, 1f) }
-                6 -> matrix.setRotate(90f)
-                7 -> { matrix.setRotate(270f); matrix.postScale(-1f, 1f) }
-                8 -> matrix.setRotate(270f)
-            }
-            if (!matrix.isIdentity) oriented = Bitmap.createBitmap(decoded, 0, 0, decoded.width, decoded.height, matrix, false)
-            val scaled = Bitmap.createScaledBitmap(oriented, 300, 300, false)
-            try {
-                val argb = IntArray(300 * 300); scaled.getPixels(argb, 0, 300, 0, 0, 300, 300)
-                return ByteArray(argb.size * 3).also { rgb -> for (i in argb.indices) {
-                    rgb[i*3] = (argb[i] shr 16).toByte(); rgb[i*3+1] = (argb[i] shr 8).toByte(); rgb[i*3+2] = argb[i].toByte()
-                } }
-            } finally { if (scaled !== oriented) scaled.recycle() }
-        } finally { if (oriented !== decoded) oriented.recycle(); decoded.recycle() }
+            val argb = IntArray(300 * 300); scaled.getPixels(argb, 0, 300, 0, 0, 300, 300)
+            ByteArray(argb.size * 3).also { rgb -> for (i in argb.indices) {
+                rgb[i*3] = (argb[i] shr 16).toByte(); rgb[i*3+1] = (argb[i] shr 8).toByte(); rgb[i*3+2] = argb[i].toByte()
+            } }
+        } finally { if (scaled !== oriented) scaled.recycle() }
     }
     override fun infer(inputJson: String): String {
         val image = File(JSONObject(inputJson).getString("imagePath"))

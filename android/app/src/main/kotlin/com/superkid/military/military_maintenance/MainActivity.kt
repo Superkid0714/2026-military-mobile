@@ -49,7 +49,7 @@ class MainActivity : FlutterActivity() {
                             }, 701)
                         }
                         "pickBackup", "pickEmbedding", "pickLlm" -> {
-                            importLimit = when (call.method) { "pickLlm" -> 512L * 1024 * 1024; "pickEmbedding" -> 256L * 1024 * 1024; else -> maxBytes }
+                            importLimit = when (call.method) { "pickLlm" -> 512L * 1024 * 1024; "pickEmbedding" -> 1280L * 1024 * 1024; else -> maxBytes }
                             pending = result
                             startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
                                 addCategory(Intent.CATEGORY_OPENABLE)

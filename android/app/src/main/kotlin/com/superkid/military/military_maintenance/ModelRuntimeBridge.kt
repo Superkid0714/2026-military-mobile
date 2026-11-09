@@ -146,7 +146,7 @@ class ModelRuntimeBridge(private val context: Context) {
                 try { val data = memoryTrace.stop(); main.post { result.success(data) } }
                 catch (_: Exception) { main.post { result.error("trace", "메모리 표본 수집 종료 실패", null) } }
             }
-            "modelInfo" -> try { result.success(EmbeddingFiles.info(context) + mapOf("optionalModels" to listOf(LlmFiles.info(context), VisionFiles.info(context)), "systemPilot" to SystemPilotFiles.info(context))) }
+            "modelInfo" -> try { result.success(EmbeddingFiles.info(context) + mapOf("optionalModels" to listOf(LlmFiles.info(context), VisionFiles.info(context), FrontPartSession.info(context)), "systemPilot" to SystemPilotFiles.info(context), "appVersion" to (context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: ""))) }
                 catch (_: Exception) { result.error("bundle", "임베딩 묶음 확인 실패", null) }
             "installLlm" -> {
                 files.execute {

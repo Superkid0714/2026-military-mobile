@@ -90,6 +90,7 @@ class ModelWorkerService : Service() {
         if (id == "distiluse-int8-v1" && android.os.Build.VERSION.SDK_INT >= 24) return OnnxEmbeddingSession(this, threads)
         if (id == LlmFiles.ID && LlmFiles.supported()) return LlamaSession(this, threads)
         if (id == VisionFiles.ID) return OnnxVisionSession(this, threads)
+        if (id == FrontPartSession.ID) return FrontPartSession(this, threads)
         if (id == SystemPilotFiles.ID) return SystemPilotSession(this, threads)
         throw UnsupportedOperationException("runtime_not_installed")
     }

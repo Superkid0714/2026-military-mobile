@@ -8,6 +8,8 @@ android {
     namespace = "com.superkid.military.military_maintenance"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
+    // Device builds may include the verified local front-part model.
+    sourceSets.getByName("main").assets.srcDir("../../.tools/front-vision-assets")
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -36,6 +38,7 @@ android {
             // TODO: Add your own signing config for the release build.
             // Signing with the debug keys for now, so `flutter run --release` works.
             signingConfig = signingConfigs.getByName("debug")
+            proguardFiles("proguard-rules.pro")
         }
     }
 }

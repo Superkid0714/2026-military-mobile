@@ -12,7 +12,7 @@ import org.json.JSONObject
 
 class OnnxEmbeddingSession(context: Context, threads: Int) : NativeModelSession {
     private val directory = EmbeddingFiles.active(context)
-    private val manifest = EmbeddingFiles.validate(directory)
+    private val manifest = EmbeddingFiles.validate(directory, verifyCorpus = false)
     private val tokenizer = WordPiece(java.io.File(directory, "vocab.txt"))
     private val environment = OrtEnvironment.getEnvironment()
     private val session = OrtSession.SessionOptions().use { options ->
