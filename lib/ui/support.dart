@@ -53,7 +53,7 @@ class _SupportState extends ConsumerState<SupportScreen> {
         setState(() {
           summary = result;
           summaryKey = key;
-          summarySources = {for (final e in evidence.take(2)) e.id: e};
+          summarySources = {for (final e in evidence.take(5)) e.id: e};
         });
       }
     } finally {
@@ -209,13 +209,22 @@ class _SupportState extends ConsumerState<SupportScreen> {
       controller: scroll,
       children: [
         PageTitle(
-          'AI 정비지원',
-          '차량·차종·표준부품·시간을 기준으로 정비거리, 문서 근거와 현장 기록을 연결합니다.',
+          '부품별 정비',
+          '',
           scopeVehicles: [v],
         ),
+        if (ref.watch(adaptiveRuntimeProvider).modelInfo['corpusDatabasePath']
+            is String)
+          Align(
+            alignment: Alignment.centerLeft,
+            child: FilledButton.icon(
+              onPressed: () => context.go('/manual-search'),
+              icon: const Icon(Icons.menu_book),
+              label: const Text('전체 책자 검색'),
+            ),
+          ),
         Panel(
-          title: '지원 대상',
-          subtitle: '등록 문서 검색 · 자동 답변 미연결 · 기기 내 처리',
+          title: '차량과 부품 고르기',
           child: Column(
             children: [
               DropdownButtonFormField<String>(
@@ -227,7 +236,9 @@ class _SupportState extends ConsumerState<SupportScreen> {
                     .map(
                       (v) => DropdownMenuItem(
                         value: v.id,
-                        child: Text('${v.id} · ${v.model}'),
+                        child: Text(
+                          '${vehicleLabel(v.id)} · ${modelLabel(v.model)}',
+                        ),
                       ),
                     )
                     .toList(),
@@ -291,15 +302,29 @@ class _SupportState extends ConsumerState<SupportScreen> {
                   key: const ValueKey('run-hybrid-search'),
                   onPressed: embeddingBusy || query.text.trim().isEmpty
                       ? null
+                      : ref
+                                .watch(adaptiveRuntimeProvider)
+                                .modelInfo['corpusDatabasePath']
+                            is String
+                      ? () => context.go('/manual-search')
                       : searchHybrid,
                   icon: const Icon(Icons.manage_search),
-                  label: Text(embeddingBusy ? '로컬 임베딩 검색 중…' : '임베딩·키워드 혼합 검색'),
+                  label: Text(
+                    embeddingBusy
+                        ? '질문과 관련된 내용을 찾는 중…'
+                        : ref
+                                  .watch(adaptiveRuntimeProvider)
+                                  .modelInfo['corpusDatabasePath']
+                              is String
+                        ? '전체 책자 검색에서 질문하기'
+                        : '질문 뜻과 입력한 말을 함께 살펴 찾기',
+                  ),
                 ),
                 if (currentHybrid != null)
                   Text(
                     currentHybrid.mode == 'hybrid'
-                        ? '차량·부품 적용조건 확인 후 혼합 검색 · 원문 근거 표시'
-                        : '임베딩 검색을 사용할 수 없어 키워드 검색으로 표시합니다.',
+                        ? '차량과 부품에 맞는 참고 내용을 찾았습니다.'
+                        : '입력한 말이 들어 있는 내용을 찾아 보여드립니다.',
                   ),
               ],
               if (query.text.trim().isNotEmpty) ...[
@@ -400,8 +425,7 @@ class _SupportState extends ConsumerState<SupportScreen> {
         ),
         const SizedBox(height: 16),
         Panel(
-          title: '정비 문서 근거',
-          subtitle: '${v.model} · 표준부품 및 입력 키워드로 검색 · 상위 5건',
+          title: '관련 책자',
           action: TextButton(
             onPressed: () => showEvidenceEditor(context, s, v.model, part),
             child: const Text('근거 등록'),
@@ -409,20 +433,14 @@ class _SupportState extends ConsumerState<SupportScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              note(
-                s.supportLibrary.knowledge.concepts.isEmpty
-                    ? '등록한 문서에서 검색한 원문과 위치를 표시합니다. 자동 생성 답변은 제공하지 않습니다.'
-                    : '원문 인용과 위치를 표시합니다. 원문의 숫자는 적용 주기 판정이 아닙니다. 적용 수치는 아래 등록 주기·부대 선택 기준에서만 확인합니다.',
-              ),
-              const SizedBox(height: 12),
-              if (evidence.isEmpty) empty('이 차종과 검색 조건에 맞는 등록 근거가 없습니다.'),
+              if (evidence.isNotEmpty)
+                const Text('정비 주기는 아래에 등록된 기준을 확인하세요.'),
+              if (evidence.isEmpty) empty('관련 책자 내용을 찾지 못했습니다.'),
               if (ref
                   .watch(adaptiveRuntimeProvider)
                   .installedModels
                   .any((m) => m.id == 'qwen3-0.6b-q4_0')) ...[
-                const Text(
-                  '선택 LLM 시험 · 실기기 사양 기준 미확정. 검증된 원문 문장만 추출하며 교환 수치는 등록 규칙에서 확인합니다.',
-                ),
+                const Text('책자의 문장을 골라 짧게 정리합니다. 교환 수치는 등록한 정비 기준을 확인하세요.'),
                 TextButton(
                   onPressed:
                       summaryBusy ||
@@ -432,7 +450,7 @@ class _SupportState extends ConsumerState<SupportScreen> {
                               .generationTrialAvailable
                       ? null
                       : () => summarize(evidence),
-                  child: Text(summaryBusy ? '원문 요약 검증 중…' : '근거 2개로 짧은 요약 시험'),
+                  child: Text(summaryBusy ? '원문을 짧게 정리하는 중…' : '참고 내용 2개 요약하기'),
                 ),
                 if (summaryKey == searchKey(s) && summary != null)
                   if (summary!.mode == 'extractive_summary')
@@ -468,9 +486,7 @@ class _SupportState extends ConsumerState<SupportScreen> {
                         ],
                       )
                   else
-                    const Text(
-                      '요약을 채택하지 않았습니다. 아래 원문 근거와 등록 주기를 확인해 주세요. (retrieval_only)',
-                    ),
+                    const Text('요약을 채택하지 않았습니다. 아래 원문 근거와 등록 주기를 확인해 주세요.'),
               ],
               for (final e in evidence)
                 Padding(
@@ -483,7 +499,7 @@ class _SupportState extends ConsumerState<SupportScreen> {
                         style: const TextStyle(fontWeight: FontWeight.w700),
                       ),
                       Text(
-                        '${e.model} · ${standardPart(e.part)} · ${e.symptoms}',
+                        '${modelLabel(e.model)} · ${standardPart(e.part)} · ${e.symptoms}',
                         style: const TextStyle(color: muted),
                       ),
                       const SizedBox(height: 8),
@@ -509,14 +525,13 @@ class _SupportState extends ConsumerState<SupportScreen> {
           const SizedBox(height: 16),
         ],
         Panel(
-          title: '잔여 정비거리',
-          subtitle: 'R = max(0, 권장 주기 − 마지막 교환 이후 주행거리)',
+          title: '다음 점검까지 남은 거리',
           action: TextButton(
             onPressed: () => showRuleEditor(context, s, v.id, part),
             child: const Text('주기·교환 기준 등록'),
           ),
           child: rules.isEmpty
-              ? empty('등록된 정비 주기가 없습니다. 확인한 지침의 주기와 마지막 교환 계기를 등록해 주세요.')
+              ? empty('정비 주기와 마지막 교환 기록을 등록하세요.')
               : Column(
                   children: [
                     if (rules.any((r) => r.templateId != null))
@@ -563,7 +578,6 @@ class _SupportState extends ConsumerState<SupportScreen> {
         const SizedBox(height: 16),
         Panel(
           title: '관련 정비 이력',
-          subtitle: '${v.id} · 부품·증상 조건 · 최근 최대 12건',
           child: records.isEmpty
               ? empty('일치하는 차량 정비 이력이 없습니다.')
               : Column(
@@ -573,7 +587,7 @@ class _SupportState extends ConsumerState<SupportScreen> {
                         contentPadding: EdgeInsets.zero,
                         title: Text('${standardPart(r.part)} · ${r.date}'),
                         subtitle: Text(
-                          '${part.isNotEmpty && s.supportLibrary.knowledge.conceptFor(part) != null && r.confirmedConceptId == null ? '부품 연결 미확인 후보 · ' : ''}${r.description}',
+                          '${part.isNotEmpty && s.supportLibrary.knowledge.conceptFor(part) != null && r.confirmedConceptId == null ? '부품 연결 미확인 후보 · ' : ''}${maintenanceDescriptionLabel(r)}',
                         ),
                         trailing: const Icon(Icons.chevron_right),
                         onTap: () => context.go('/records/${r.id}'),
@@ -583,8 +597,7 @@ class _SupportState extends ConsumerState<SupportScreen> {
         ),
         const SizedBox(height: 16),
         Panel(
-          title: '현장 점검 연결',
-          subtitle: '같은 차량·부품의 촬영 기록 · 수동 지정 · 최대 6건',
+          title: '점검 사진',
           child: inspections.isEmpty
               ? empty('연결된 현장 기록이 없습니다.')
               : Column(
@@ -633,43 +646,48 @@ class BlockingMaintenanceLinks extends StatelessWidget {
     required this.rule,
     required this.store,
     this.asOf,
+    this.limit,
     super.key,
   });
   final MaintenanceRule rule;
   final AppStore store;
   final DateTime? asOf;
+  final int? limit;
 
   @override
-  Widget build(BuildContext context) => Column(
-    children: [
-      if (asOf != null &&
-          store.serviceDistance(rule, asOf: asOf).blockingRecordIds.isNotEmpty)
-        const Text('과거 기준 조회입니다. 기록 수정은 현재 기준으로 돌아가 확인해 주세요.'),
-      if (asOf == null)
-        for (final id in store.serviceDistance(rule).blockingRecordIds)
-          if (store.records
-                  .where((r) => r.id == id && r.vehicleId == rule.vehicleId)
-                  .firstOrNull
-              case final record?)
-            ListTile(
-              contentPadding: EdgeInsets.zero,
-              title: Text('${record.date} · ${record.part}'),
-              subtitle: Text(
-                '교환 여부: ${replacementStatusLabel(record.replacementCompleted)}',
-              ),
-              trailing: TextButton(
-                key: ValueKey('resolve-maintenance-$id'),
-                onPressed: () => context.go(
-                  Uri(
-                    path: '/entry',
-                    queryParameters: {'record': id},
-                  ).toString(),
+  Widget build(BuildContext context) {
+    final blockers = store.serviceDistance(rule, asOf: asOf).blockingRecordIds;
+    final visibleBlockers = limit == null ? blockers : blockers.take(limit!);
+    return Column(
+      children: [
+        if (asOf != null && blockers.isNotEmpty)
+          const Text('과거 기준 조회입니다. 기록 수정은 현재 기준으로 돌아가 확인해 주세요.'),
+        if (asOf == null)
+          for (final id in visibleBlockers)
+            if (store.records
+                    .where((r) => r.id == id && r.vehicleId == rule.vehicleId)
+                    .firstOrNull
+                case final record?)
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                title: Text('${record.date} · ${record.part}'),
+                subtitle: Text(
+                  '교환 여부: ${replacementStatusLabel(record.replacementCompleted)}',
                 ),
-                child: const Text('확인하기'),
+                trailing: TextButton(
+                  key: ValueKey('resolve-maintenance-$id'),
+                  onPressed: () => context.go(
+                    Uri(
+                      path: '/entry',
+                      queryParameters: {'record': id},
+                    ).toString(),
+                  ),
+                  child: const Text('확인하기'),
+                ),
               ),
-            ),
-    ],
-  );
+      ],
+    );
+  }
 }
 
 class RuleTile extends StatelessWidget {
@@ -819,7 +837,9 @@ class _PlanState extends ConsumerState<MaintenancePlanScreen> {
                   ...s.vehicles.map(
                     (v) => DropdownMenuItem(
                       value: v.id,
-                      child: Text('${v.id} · ${v.model}'),
+                      child: Text(
+                        '${vehicleLabel(v.id)} · ${modelLabel(v.model)}',
+                      ),
                     ),
                   ),
                 ],
@@ -857,7 +877,9 @@ class _PlanState extends ConsumerState<MaintenancePlanScreen> {
                         for (final v in s.vehicles)
                           SimpleDialogOption(
                             onPressed: () => Navigator.pop(dialogContext, v.id),
-                            child: Text('${v.id} · ${v.model}'),
+                            child: Text(
+                              '${vehicleLabel(v.id)} · ${modelLabel(v.model)}',
+                            ),
                           ),
                       ],
                     ),
@@ -940,7 +962,7 @@ Future<void> showEvidenceEditor(
   final fields = {
     '차종': TextEditingController(text: model),
     '표준부품명': TextEditingController(text: part),
-    '증상 키워드': TextEditingController(),
+    '증상 설명': TextEditingController(),
     '문서명·개정판': TextEditingController(),
     '원문 위치(쪽·절)': TextEditingController(),
     '원문 구간': TextEditingController(),
@@ -950,7 +972,7 @@ Future<void> showEvidenceEditor(
       id: store.newId('DOC'),
       model: fields['차종']!.text.trim(),
       part: standardPart(fields['표준부품명']!.text),
-      symptoms: fields['증상 키워드']!.text.trim(),
+      symptoms: fields['증상 설명']!.text.trim(),
       title: fields['문서명·개정판']!.text.trim(),
       location: fields['원문 위치(쪽·절)']!.text.trim(),
       text: fields['원문 구간']!.text.trim(),
@@ -1209,7 +1231,7 @@ class _EditorState extends State<_SupportEditor> {
   bool saving = false;
   String? validate(String label, String? raw) {
     final value = raw?.trim() ?? '';
-    if (value.isEmpty) return label == '증상 키워드' ? null : '$label 항목을 입력해 주세요.';
+    if (value.isEmpty) return label == '증상 설명' ? null : '$label 항목을 입력해 주세요.';
     if (label.contains('(km)')) {
       final km = parseKm(value);
       if (km == null) return '숫자를 입력해 주세요. 예: 10,000';
@@ -1287,12 +1309,12 @@ class _EditorState extends State<_SupportEditor> {
                           ? 10
                           : entry.key == '원문 구간'
                           ? 10000
-                          : entry.key.contains('근거') || entry.key == '증상 키워드'
+                          : entry.key.contains('근거') || entry.key == '증상 설명'
                           ? 1000
                           : 300,
                       decoration: InputDecoration(
                         labelText:
-                            '${entry.key}${entry.key == '증상 키워드' ? ' (선택)' : ' *'}',
+                            '${entry.key}${entry.key == '증상 설명' ? ' (선택)' : ' *'}',
                         errorMaxLines: 3,
                         helperText: entry.key.startsWith('마지막 교환 계기')
                             ? '현재 누적 ${number(widget.maxDistance ?? 0)} km'

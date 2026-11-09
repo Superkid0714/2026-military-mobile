@@ -1,7 +1,7 @@
 name: military_maintenance
 description: Galaxy Tab local maintenance management app.
 publish_to: none
-version: 0.3.0+3
+version: 0.9.4+19
 environment:
   sdk: ^3.13.0
 dependencies:
@@ -21,10 +21,31 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^6.0.0
+  camera_platform_interface: ^2.14.0
+  path_provider_platform_interface: ^2.1.2
 flutter:
   uses-material-design: true
   assets:
-    - assets/figma/
+    - assets/branding/jungbion-guide.png
+    - assets/branding/jungbion-female-guide.png
+    - assets/branding/jungbion-worker-body.png
+    - assets/branding/jungbion-worker-arm.png
+    - assets/figma/06092.svg
+    - assets/figma/11ac8.svg
+    - assets/figma/1eb55.svg
+    - assets/figma/283e7.svg
+    - assets/figma/46b39.svg
+    - assets/figma/57404.svg
+    - assets/figma/6b3fd.svg
+    - assets/figma/716e1.svg
+    - assets/figma/75a4b.png
+    - assets/figma/86ab8.svg
+    - assets/figma/94017.svg
+    - assets/figma/ba5c8.svg
+    - assets/figma/bf94f.svg
+    - assets/figma/c988a.svg
+    - assets/figma/eb71a.svg
+    - assets/figma/ed09d.png
     - assets/mock/
     - assets/models/
   fonts:

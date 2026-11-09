@@ -26,7 +26,7 @@ Future<String?> importKnowledgeFile(
         title: const Text('정비 자료 반입 검토'),
         content: SingleChildScrollView(
           child: Text(
-            '부품 개념 ${k.concepts.length}개 · 품번 후보 ${k.skus.length}개\n문서 근거 ${bundle.library.evidence.length}개 · 주기 기준 ${k.templates.length}개\n정비실적 검토 대기 ${k.pending.length}건\n\n검토 대기 실적은 실차 이력·집계·ML 입력에 넣지 않습니다. 품번 적용조건과 차량·지침 연결은 별도로 확인합니다. 현재 기록을 교체하지 않습니다.',
+            '부품 이름 ${k.concepts.length}개 · 품번 후보 ${k.skus.length}개\n문서 근거 ${bundle.library.evidence.length}개 · 주기 기준 ${k.templates.length}개\n정비실적 검토 대기 ${k.pending.length}건\n\n검토 대기 실적은 실차 이력·집계·상태 분석에 넣지 않습니다. 품번 적용조건과 차량·지침 연결은 별도로 확인합니다. 현재 기록을 교체하지 않습니다.',
           ),
         ),
         actions: [
@@ -65,7 +65,7 @@ String dualServiceSummary(ServiceDistance result) => [
       : result.remainingDays! <= 0
       ? '도래 (${day(result.calendarDue!)})'
       : '${day(result.calendarDue!)}까지 ${result.remainingDays}일'}',
-  result.firstDue,
+  plainMessage(result.firstDue),
 ].join('\n');
 
 class KnowledgePanel extends StatelessWidget {
@@ -107,7 +107,7 @@ class KnowledgePanel extends StatelessWidget {
             const SizedBox(height: 12),
           ],
           Text(
-            '부품 개념 ${k.concepts.length}개 · 품번 후보 ${k.skus.length}개 · 정비실적 검토 대기 ${k.pending.length}건',
+            '부품 이름 ${k.concepts.length}개 · 품번 후보 ${k.skus.length}개 · 정비실적 검토 대기 ${k.pending.length}건',
           ),
           for (final c in k.concepts) ...[
             const Divider(),

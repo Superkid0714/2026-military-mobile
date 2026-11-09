@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:camera/camera.dart';
@@ -7,13 +8,25 @@ import 'package:go_router/go_router.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../data/store.dart';
+import '../data/front_inspection.dart';
+import '../data/local_vision.dart';
+import '../data/model_execution.dart';
 import '../data/adaptive_runtime.dart';
 import 'components.dart';
+import 'front_inspection.dart';
 import 'support.dart';
 import 'vision_runtime.dart';
 
 class VisionScreen extends ConsumerStatefulWidget {
-  const VisionScreen({this.vehicleId, this.sessionId, this.part, super.key});
+  const VisionScreen({
+    this.vehicleId,
+    this.sessionId,
+    this.part,
+    this.inspectionArea,
+    super.key,
+  });
+  final FrontInspectionArea? inspectionArea;
+  bool get front => inspectionArea != null;
   final String? vehicleId;
   final String? sessionId;
   final String? part;
@@ -31,12 +44,95 @@ class _VisionState extends ConsumerState<VisionScreen>
   int cameraGeneration = 0;
   bool cameraStarting = false, resumeCamera = false;
   final annotation = TextEditingController();
+  final frontObservations = <FrontPart, FrontObservation>{};
+  late FrontPart frontPart;
+  bool get engineBay => widget.inspectionArea == FrontInspectionArea.engineBay;
+  String? draftId;
+  VisionDetection? frontVehicleDetection;
+  bool findingVehicle = false;
+  String? vehicleDetectionMessage;
+
+  Map<FrontPart, FrontPartProposal> frontProposals = const {};
+  bool findingParts = false;
+  String? frontProposalMessage;
+
+  Future<void> findFrontParts(String path) async {
+    if (!mounted || imagePath != path || findingParts) return;
+    final target = ref.read(storeProvider).vehicle(vehicle!).model.toLowerCase();
+    if (!target.contains('렉스턴 스포츠') && !target.contains('rexton sports')) return;
+    final runtime = ref.read(adaptiveRuntimeProvider);
+    if (!runtime.installedModels.any((model) => model.task == ModelTask.frontParts)) {
+      return;
+    }
+    setState(() => findingParts = true);
+    try {
+      final result = await runtime.run(ModelTask.frontParts, {'imagePath': path});
+      if (result.mode != 'model') throw StateError('front_parts_unavailable');
+      final proposals = FrontPartProposal.decode(result.output!);
+      if (!mounted || imagePath != path || step != 3) return;
+      setState(() {
+        frontProposals = proposals;
+        frontProposalMessage = proposals.isEmpty
+            ? '찾은 부위가 없습니다. 사진에서 직접 표시하세요.'
+            : '노란 테두리는 후보입니다. 위치를 확인하고 결과를 선택하세요.';
+      });
+    } catch (_) {
+      if (mounted && imagePath == path && step == 3) {
+        setState(() => frontProposalMessage = '부위를 직접 표시해 주세요.');
+      }
+    } finally {
+      if (mounted && imagePath == path) setState(() => findingParts = false);
+    }
+  }
+
+  Future<void> findVehicleInPhoto() async {
+    final path = imagePath;
+    if (path == null || findingVehicle || findingParts || saving) return;
+    setState(() {
+      findingVehicle = true;
+      frontVehicleDetection = null;
+      vehicleDetectionMessage = null;
+    });
+    try {
+      final result = await ref.read(adaptiveRuntimeProvider).run(
+        ModelTask.vision,
+        {'imagePath': path},
+      );
+      if (result.mode != 'model') throw StateError('vision_unavailable');
+      final analysis = VisionAnalysis.parse(result.output!);
+      final vehicles = analysis.detections
+          .where((d) => d.classId == 3 || d.classId == 8)
+          .toList()
+        ..sort((a, b) => b.score.compareTo(a.score));
+      if (!mounted) return;
+      setState(() {
+        frontVehicleDetection = vehicles.firstOrNull;
+        vehicleDetectionMessage = vehicles.isEmpty
+            ? '차량 영역을 찾지 못했습니다. 사진에서 부위를 직접 지정해 주세요.'
+            : '파란 테두리는 찾은 차량 영역입니다. 부위는 직접 지정해 주세요.';
+      });
+    } catch (_) {
+      if (mounted) {
+        setState(() => vehicleDetectionMessage =
+            '차량 영역을 찾을 수 없습니다. 부위를 직접 지정해 계속할 수 있습니다.');
+      }
+    } finally {
+      if (mounted) setState(() => findingVehicle = false);
+    }
+  }
+
   @override
   void initState() {
     super.initState();
     if (widget.part != null && widget.part!.isNotEmpty) {
       area = standardPart(widget.part!);
       mode = '부품 촬영';
+    }
+    if (widget.front) {
+      step = 1;
+      area = widget.inspectionArea!.recordArea;
+      mode = engineBay ? '엔진룸 점검' : '전면 점검';
+      frontPart = widget.inspectionArea!.parts.first;
     }
     if (widget.sessionId != null) {
       selectedSession = widget.sessionId;
@@ -45,8 +141,19 @@ class _VisionState extends ConsumerState<VisionScreen>
     WidgetsBinding.instance.addObserver(this);
   }
 
+  Future<void> _deleteDraftPhoto(String path) async {
+    try {
+      await File(path).delete();
+    } on FileSystemException {
+      // The file may already have been removed.
+    }
+  }
+
   @override
   void dispose() {
+    if (widget.front && draftId == null && imagePath != null) {
+      unawaited(_deleteDraftPhoto(imagePath!));
+    }
     WidgetsBinding.instance.removeObserver(this);
     cameraGeneration++;
     controller?.dispose();
@@ -167,14 +274,34 @@ class _VisionState extends ConsumerState<VisionScreen>
       final path =
           '${images.path}/${DateTime.now().microsecondsSinceEpoch}.jpg';
       await File(photo.path).copy(path);
+      if (!mounted) {
+        await _deleteDraftPhoto(path);
+        return;
+      }
+      final previousPath = imagePath;
+      if (widget.front && draftId == null && previousPath != null) {
+        unawaited(_deleteDraftPhoto(previousPath));
+      }
       cameraGeneration++;
       await controller?.dispose();
       controller = null;
       if (mounted) {
         setState(() {
           imagePath = path;
+          draftId = null;
+          frontObservations.clear();
+          frontProposals = const {};
+          frontProposalMessage = null;
+          findingParts = false;
+          frontVehicleDetection = null;
+          vehicleDetectionMessage = null;
           step = 3;
         });
+        if (widget.inspectionArea == FrontInspectionArea.exterior) {
+          unawaited(findFrontParts(path));
+        }
+      } else {
+        await _deleteDraftPhoto(path);
       }
     } catch (_) {
       if (mounted) {
@@ -188,23 +315,35 @@ class _VisionState extends ConsumerState<VisionScreen>
   }
 
   Future<void> save() async {
-    if (imagePath == null || saving) return;
+    if (imagePath == null || vehicle == null || saving || findingVehicle ||
+        (widget.front && frontObservations.isEmpty)) {
+      return;
+    }
     setState(() => saving = true);
     try {
       final s = ref.read(storeProvider);
-      final id = s.newId('VS');
+      final id = draftId ??= s.newId('VS');
       await s.saveInspection(
         Inspection(
           id: id,
           vehicleId: vehicle!,
           area: area,
           mode: mode,
-          created: DateTime.now().toIso8601String(),
+          created: s.clock().toIso8601String(),
           imagePath: imagePath!,
           note: annotation.text.trim(),
+          front: Map.of(frontObservations),
         ),
       );
       if (mounted) {
+        if (widget.front) {
+          if (context.canPop()) {
+            context.pop();
+          } else {
+            context.go(frontMapUrl(vehicle, widget.inspectionArea!));
+          }
+          return;
+        }
         setState(() {
           selectedSession = id;
           step = 4;
@@ -224,32 +363,36 @@ class _VisionState extends ConsumerState<VisionScreen>
   @override
   Widget build(BuildContext context) {
     final s = ref.watch(storeProvider);
+    if (widget.front && !s.vehicles.any((v) => v.id == widget.vehicleId)) {
+      return empty('전면 점검할 차량을 지도에서 다시 선택해 주세요.');
+    }
     vehicle ??= s.vehicles.any((v) => v.id == widget.vehicleId)
         ? widget.vehicleId
-        : s.activeVehicles.first.id;
+        : s.activeVehicles.firstOrNull?.id;
+    if (vehicle == null || !s.vehicles.any((v) => v.id == vehicle)) {
+      return empty('점검할 차량을 찾을 수 없습니다.');
+    }
     return ListView(
+      key: widget.front ? ValueKey(step) : null,
       children: [
         PageTitle(
-          ['비전 점검', '대상 지정', '실시간 촬영', '촬영 결과', '세션 기록'][step],
-          [
-            '차량 또는 부품을 촬영하여 상태를 점검합니다.',
-            '점검할 장비번호와 부위를 선택합니다.',
-            '차량 정면을 중앙선에 맞춰 주세요.',
-            '촬영한 원본과 현장 점검 내용을 기록합니다.',
-            '저장된 원본 프레임과 점검 기록을 확인합니다.',
-          ][step],
+          widget.front
+              ? [mode, '1. 차량 확인', engineBay ? '2. 엔진룸 촬영' : '2. 전면 촬영', '3. 부위별 점검', '사진 기록'][step]
+              : ['사진 점검', '대상 지정', '실시간 촬영', '촬영 결과', '사진 기록'][step],
+          widget.front && step == 3 ? '부위 선택 → 사진에 표시 → 결과 선택' : '',
           scopeVehicles: [s.vehicle(vehicle!)],
           action: step == 0
               ? TextButton(
                   onPressed: () => setState(() => step = 4),
-                  child: const Text('세션 기록'),
+                  child: const Text('사진 기록'),
                 )
               : null,
         ),
-        if (ref.watch(adaptiveRuntimeProvider).cameraBlocked && step < 4)
+        if (ref.watch(adaptiveRuntimeProvider).cameraBlocked &&
+            step < (widget.front ? 3 : 4))
           Panel(
             title: '카메라 사용 불가 · 수동 부품 선택',
-            subtitle: 'Vision은 꺼집니다. 사진 없이 근거·이력 조회와 정비 등록을 계속할 수 있습니다.',
+            subtitle: '다시 연결하거나 부품을 직접 선택하세요.',
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
@@ -261,11 +404,13 @@ class _VisionState extends ConsumerState<VisionScreen>
                       .map(
                         (v) => DropdownMenuItem(
                           value: v.id,
-                          child: Text('${v.id} · ${v.model}'),
+                          child: Text('${vehicleLabel(v.id)} · ${modelLabel(v.model)}'),
                         ),
                       )
                       .toList(),
-                  onChanged: (v) => setState(() => vehicle = v ?? vehicle),
+                  onChanged: widget.front
+                      ? null
+                      : (v) => setState(() => vehicle = v ?? vehicle),
                 ),
                 DropdownButtonFormField<String>(
                   key: const ValueKey('manual-part-without-camera'),
@@ -288,14 +433,14 @@ class _VisionState extends ConsumerState<VisionScreen>
                 FilledButton(
                   key: const ValueKey('manual-part-support'),
                   onPressed: () => context.go(supportUrl(vehicle!, area)),
-                  child: const Text('선택 부품의 근거·이력 확인'),
+                  child: const Text('책자와 수리 기록'),
                 ),
                 TextButton(
                   onPressed: () {
                     setState(() => step = 2);
                     startCamera();
                   },
-                  child: const Text('카메라 사용 조건 다시 확인'),
+                  child: const Text('카메라 다시 연결'),
                 ),
               ],
             ),
@@ -307,7 +452,7 @@ class _VisionState extends ConsumerState<VisionScreen>
         else if (step == 2)
           _live()
         else if (step == 3)
-          _result()
+          (widget.front ? _frontResult() : _result())
         else
           _sessions(s),
       ],
@@ -315,172 +460,116 @@ class _VisionState extends ConsumerState<VisionScreen>
   }
 
   Widget _mode() => Panel(
-    title: '점검할 대상을 선택해 주세요',
-    subtitle: '선택한 대상에 맞는 촬영 가이드가 제공됩니다.',
+    title: '무엇을 찍을까요?',
     child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        ResponsiveColumns(
-          breakpoint: 600,
+        FilledButton.icon(
+          onPressed: () => context.push(frontMapUrl(vehicle)),
+          icon: const Icon(Icons.directions_car_outlined),
+          label: const Text('전면 점검'),
+        ),
+        const SizedBox(height: 8),
+        OutlinedButton.icon(
+          onPressed: () => context.push(frontMapUrl(vehicle, FrontInspectionArea.engineBay)),
+          icon: const Icon(Icons.build_outlined),
+          label: const Text('엔진룸 점검'),
+        ),
+        const SizedBox(height: 16),
+        const Text('일반 촬영'),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
           children: [
             for (final value in ['차량 촬영', '부품 촬영'])
-              InkWell(
-                onTap: () => setState(() => mode = value),
-                borderRadius: BorderRadius.circular(10),
-                child: Container(
-                  height: 290,
-                  padding: const EdgeInsets.all(22),
-                  decoration: BoxDecoration(
-                    color: mode == value
-                        ? const Color(0xFFECFBF3)
-                        : Colors.white,
-                    border: Border.all(
-                      color: mode == value ? green : line,
-                      width: mode == value ? 2 : 1,
-                    ),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: Column(
-                    children: [
-                      Align(
-                        alignment: Alignment.centerRight,
-                        child: cell(
-                          mode == value ? '● 선택됨' : '선택 가능',
-                          color: mode == value ? green : muted,
-                        ),
-                      ),
-                      const Spacer(),
-                      Container(
-                        width: 100,
-                        height: 100,
-                        decoration: BoxDecoration(
-                          color: value == '차량 촬영'
-                              ? const Color(0xFFDDF7E8)
-                              : const Color(0xFFF8F9FA),
-                          border: Border.all(
-                            color: value == '차량 촬영' ? green : line,
-                          ),
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Stack(
-                          alignment: Alignment.center,
-                          children: [
-                            DesignIcon(
-                              '1:2446',
-                              value == '차량 촬영' ? 'imgCamera' : 'imgCamera1',
-                              size: 44,
-                            ),
-                            Positioned(
-                              right: 10,
-                              bottom: 10,
-                              child: Container(
-                                width: 34,
-                                height: 34,
-                                decoration: BoxDecoration(
-                                  color: Colors.white,
-                                  shape: BoxShape.circle,
-                                  border: Border.all(
-                                    color: value == '차량 촬영' ? green : line,
-                                  ),
-                                ),
-                                child: Center(
-                                  child: DesignIcon(
-                                    '1:2446',
-                                    value == '차량 촬영' ? 'imgTruck' : 'imgWrench',
-                                    size: 18,
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(height: 22),
-                      Text(
-                        value,
-                        style: const TextStyle(
-                          fontSize: 23,
-                          fontWeight: FontWeight.w800,
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      Text(
-                        value == '차량 촬영'
-                            ? '차량 전면·측면을 촬영하여 외관 상태를 기록합니다.'
-                            : '정비 대상 부품을 가까이 촬영하여 상태를 기록합니다.',
-                        textAlign: TextAlign.center,
-                        style: const TextStyle(fontSize: 12, color: muted),
-                      ),
-                      const Spacer(),
-                    ],
-                  ),
-                ),
+              ChoiceChip(
+                label: Text(value),
+                selected: mode == value,
+                onSelected: (_) => setState(() => mode = value),
               ),
           ],
         ),
-        const SizedBox(height: 20),
-        note('충분한 조명을 확보하고, 차량 또는 부품 전체가 촬영 가이드 안에 들어오도록 유지해 주세요.'),
-        const SizedBox(height: 40),
-        Row(
-          children: [
-            Expanded(child: cell('현재 선택 · $mode', bold: true)),
-            FilledButton.icon(
-              onPressed: () => setState(() => step = 1),
-              icon: const DesignIcon('1:2446', 'imgCamera2'),
-              label: const Text('시작하기'),
-            ),
-          ],
+        const SizedBox(height: 12),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: OutlinedButton.icon(
+            onPressed: () => setState(() => step = 1),
+            icon: const Icon(Icons.arrow_forward),
+            label: const Text('시작하기'),
+          ),
         ),
       ],
     ),
   );
+
   Widget _target(AppStore s) => Panel(
-    title: '점검 대상을 확인해 주세요',
+    title: widget.front ? '선택한 차량 확인' : '점검 대상을 확인해 주세요',
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const Text('장비번호 *', style: TextStyle(fontWeight: FontWeight.w700)),
-        const SizedBox(height: 12),
-        DropdownButtonFormField<String>(
-          initialValue: vehicle,
-          items: s.vehicles
-              .map(
-                (v) => DropdownMenuItem(
+        if (widget.front)
+          Text(
+            '${vehicleLabel(vehicle!)} · ${modelLabel(s.vehicle(vehicle!).model)}',
+            style: const TextStyle(fontWeight: FontWeight.w700),
+          )
+        else ...[
+          const Text('차량', style: TextStyle(fontWeight: FontWeight.w700)),
+          const SizedBox(height: 8),
+          DropdownButtonFormField<String>(
+            initialValue: vehicle,
+            isExpanded: true,
+            items: [
+              for (final v in s.vehicles)
+                DropdownMenuItem(
                   value: v.id,
-                  child: Text('${v.id} · ${v.model}'),
+                  child: Text('${vehicleLabel(v.id)} · ${modelLabel(v.model)}'),
                 ),
-              )
-              .toList(),
-          onChanged: (v) => setState(() => vehicle = v),
-        ),
-        const SizedBox(height: 28),
-        const Text('점검 부위', style: TextStyle(fontWeight: FontWeight.w700)),
-        const SizedBox(height: 14),
-        Wrap(
-          spacing: 12,
-          runSpacing: 12,
-          children:
-              {'외관', '차체', '창문', '조명', '하부', '엔진룸', ...standardParts.keys, area}
-                  .map(
-                    (a) => ChoiceChip(
-                      label: Padding(
-                        padding: const EdgeInsets.all(8),
-                        child: Text(a),
+            ],
+            onChanged: (v) => setState(() => vehicle = v),
+          ),
+        ],
+        if (!widget.front) ...[
+          const SizedBox(height: 16),
+          const Text('점검 부위', style: TextStyle(fontWeight: FontWeight.w700)),
+          const SizedBox(height: 14),
+          Wrap(
+            spacing: 12,
+            runSpacing: 12,
+            children:
+                {'외관', '차체', '창문', '조명', '하부', '엔진룸', ...standardParts.keys, area}
+                    .map(
+                      (a) => ChoiceChip(
+                        label: Padding(
+                          padding: const EdgeInsets.all(8),
+                          child: Text(a),
+                        ),
+                        selected: area == a,
+                        onSelected: (_) => setState(() => area = a),
                       ),
-                      selected: area == a,
-                      onSelected: (_) => setState(() => area = a),
-                    ),
-                  )
-                  .toList(),
-        ),
-        const SizedBox(height: 28),
+                    )
+                    .toList(),
+          ),
+        ],
+        const SizedBox(height: 16),
         note('주변 안전을 확보하고 장비가 정차된 상태인지 확인해 주세요.'),
-        const SizedBox(height: 48),
+        const SizedBox(height: 16),
         Wrap(
           spacing: 12,
           runSpacing: 12,
           children: [
             OutlinedButton(
-              onPressed: () => setState(() => step = 0),
+              onPressed: () {
+                if (widget.front) {
+                  if (context.canPop()) {
+                    context.pop();
+                  } else {
+                    context.go(frontMapUrl(vehicle, widget.inspectionArea!));
+                  }
+                } else {
+                  setState(() => step = 0);
+                }
+              },
               child: const Text('이전'),
             ),
             FilledButton.icon(
@@ -498,7 +587,6 @@ class _VisionState extends ConsumerState<VisionScreen>
   );
   Widget _live() => Panel(
     title: '$vehicle · $area',
-    subtitle: '카메라 촬영 · AI 판정 모델 미연결',
     child: Column(
       children: [
         ResponsiveColumns(
@@ -564,7 +652,9 @@ class _VisionState extends ConsumerState<VisionScreen>
                         padding: const EdgeInsets.all(7),
                         color: ink,
                         child: Text(
-                          controller == null ? 'Figma 촬영 가이드 예시' : '● 카메라 미리보기',
+                          controller == null
+                              ? (widget.front ? '촬영 위치 안내' : 'Figma 촬영 가이드 예시')
+                              : '● 카메라 미리보기',
                           style: const TextStyle(
                             color: Colors.white,
                             fontSize: 11,
@@ -576,37 +666,15 @@ class _VisionState extends ConsumerState<VisionScreen>
                 ),
               ),
             ),
-            Column(
-              children: [
-                Panel(
-                  title: '부품 식별 상태',
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      for (final p in [
-                        '전조등',
-                        '전면 범퍼',
-                        '타이어',
-                        '라디에이터 그릴',
-                        '차체 패널',
-                      ])
-                        Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 15),
-                          child: Row(
-                            children: [
-                              Expanded(child: cell(p, bold: true)),
-                              cell('자동 식별 미연결', color: muted),
-                            ],
-                          ),
-                        ),
-                      note(
-                        '영상 자동 인식 모델 연결 전입니다. 점검 대상을 수동 지정하고 관련 정비 근거로 연결합니다. 고장 여부는 담당자가 확인합니다.',
-                        color: Colors.orange,
-                      ),
-                    ],
-                  ),
-                ),
-              ],
+            Panel(
+              title: '촬영 안내',
+              child: Text(
+                engineBay
+                    ? '엔진룸 전체가 보이게 찍으세요.'
+                    : widget.front
+                    ? '보닛, 전조등, 그릴, 범퍼가 모두 보이게 찍으세요.'
+                    : '점검할 차량이나 부품이 화면에 들어오게 찍으세요.',
+              ),
             ),
           ],
         ),
@@ -616,7 +684,7 @@ class _VisionState extends ConsumerState<VisionScreen>
           runSpacing: 12,
           children: [
             OutlinedButton(
-              onPressed: () async {
+              onPressed: capturing ? null : () async {
                 cameraGeneration++;
                 await controller?.dispose();
                 controller = null;
@@ -658,6 +726,152 @@ class _VisionState extends ConsumerState<VisionScreen>
       ],
     ),
   );
+  Widget _frontResult() {
+    final parts = widget.inspectionArea!.parts;
+    final current = frontObservations[frontPart];
+    final proposal = current == null ? frontProposals[frontPart] : null;
+    final x = current?.x ?? proposal?.x;
+    final y = current?.y ?? proposal?.y;
+    return Panel(
+      title: '기록한 부위 ${frontObservations.length} / ${parts.length}',
+      subtitle: engineBay
+          ? '부위를 고른 뒤 사진에서 위치를 눌러 주세요.'
+          : '좌우는 운전석에서 앞을 볼 때 기준입니다.',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (final part in parts)
+                ChoiceChip(
+                  label: Text(
+                    '${part.number}. ${part.label}'
+                    '${frontObservations.containsKey(part) ? ' ✓' : frontProposals.containsKey(part) ? ' · 후보' : ''}',
+                  ),
+                  selected: frontPart == part,
+                  onSelected: saving ? null : (_) => setState(() => frontPart = part),
+                ),
+            ],
+          ),
+          if (findingParts)
+            const Text('사진에서 부위를 찾고 있어요.')
+          else if (frontProposalMessage != null)
+            Text(frontProposalMessage!),
+          const SizedBox(height: 12),
+          FrontPhoto(
+            path: imagePath!,
+            observations: frontObservations,
+            vehicleDetection: frontVehicleDetection,
+            proposals: frontProposals,
+            onMark: saving
+                ? null
+                : (offset) => setState(() {
+                    frontObservations[frontPart] = FrontObservation(
+                      current?.status == FrontCheck.checked
+                          ? FrontCheck.checked
+                          : FrontCheck.review,
+                      x: offset.dx,
+                      y: offset.dy,
+                    );
+                  }),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            '${frontPart.label} · ${current?.status.label ?? (proposal == null ? '사진에서 위치를 눌러 주세요' : '후보 위치 확인')}',
+            style: const TextStyle(fontWeight: FontWeight.w700),
+          ),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (final status in FrontCheck.values)
+                ChoiceChip(
+                  label: Text(status.label),
+                  selected: current?.status == status,
+                  onSelected: saving || (status != FrontCheck.hidden && x == null)
+                      ? null
+                      : (_) => setState(() {
+                          frontObservations[frontPart] = status == FrontCheck.hidden
+                              ? const FrontObservation(FrontCheck.hidden)
+                              : FrontObservation(status, x: x, y: y);
+                        }),
+                ),
+              if (current != null)
+                TextButton(
+                  onPressed: saving
+                      ? null
+                      : () => setState(() => frontObservations.remove(frontPart)),
+                  child: const Text('이 부위 기록 지우기'),
+                ),
+            ],
+          ),
+          if (engineBay)
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(
+                onPressed: () => context.push(
+                  Uri(
+                    path: '/manual-search',
+                    queryParameters: {'query': frontPart.searchTerm},
+                  ).toString(),
+                ),
+                icon: const Icon(Icons.menu_book_outlined),
+                label: const Text('관련 책자'),
+              ),
+            ),
+          if (!engineBay && ref.watch(adaptiveRuntimeProvider).installedModels
+              .any((model) => model.id == 'ssd-mobilenet-int8-public-v1'))
+            Align(
+              alignment: Alignment.centerLeft,
+              child: OutlinedButton.icon(
+                onPressed: saving || findingVehicle || findingParts ? null : findVehicleInPhoto,
+                icon: const Icon(Icons.center_focus_weak),
+                label: Text(findingVehicle ? '차량을 찾는 중…' : '사진에서 차량 찾기'),
+              ),
+            ),
+          if (vehicleDetectionMessage != null) Text(vehicleDetectionMessage!),
+          const SizedBox(height: 16),
+          TextField(
+            controller: annotation,
+            enabled: !saving,
+            minLines: 1,
+            maxLines: 3,
+            maxLength: 10000,
+            decoration: const InputDecoration(
+              labelText: '메모 (선택)',
+              counterText: '',
+            ),
+          ),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              OutlinedButton(
+                onPressed: saving || findingVehicle ? null : () {
+                  setState(() {
+                    step = 2;
+                    findingParts = false;
+                  });
+                  startCamera();
+                },
+                child: const Text('다시 촬영'),
+              ),
+              FilledButton(
+                onPressed: saving || findingVehicle || frontObservations.isEmpty
+                    ? null
+                    : save,
+                child: Text(saving ? '저장 중…' : '점검 저장'),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _result() => Panel(
     title: '촬영 결과 · 수동 점검',
     child: Column(
@@ -705,7 +919,7 @@ class _VisionState extends ConsumerState<VisionScreen>
             ),
             FilledButton(
               onPressed: saving ? null : save,
-              child: Text(saving ? '저장 중…' : '세션 기록 저장'),
+              child: Text(saving ? '저장 중…' : '사진 기록 저장'),
             ),
           ],
         ),
@@ -753,6 +967,7 @@ class _VisionState extends ConsumerState<VisionScreen>
                                     height: 125,
                                     child: Image.file(
                                       File(i.imagePath),
+                                      cacheWidth: 570,
                                       fit: BoxFit.cover,
                                       errorBuilder: (_, e, stack) =>
                                           const Center(child: Text('원본 파일 없음')),
@@ -775,8 +990,8 @@ class _VisionState extends ConsumerState<VisionScreen>
                                           i.vision == null
                                               ? '수동 점검 · AI 미판정'
                                               : i.confirmedConceptId == null
-                                              ? '공개 모델 시험 · 개념 미확인'
-                                              : '공개 모델 시험 · 사용자 개념 확인',
+                                              ? '사진 확인 · 부품 미선택'
+                                              : '사진 확인 · 부품 선택 완료',
                                           color: muted,
                                         ),
                                       ],
@@ -793,7 +1008,7 @@ class _VisionState extends ConsumerState<VisionScreen>
         ),
         if (selected != null) ...[
           const SizedBox(height: 16),
-          if (ref
+          if (selected.front.isEmpty && ref
               .watch(adaptiveRuntimeProvider)
               .installedModels
               .any((m) => m.id == 'ssd-mobilenet-int8-public-v1')) ...[
@@ -812,6 +1027,13 @@ class _VisionState extends ConsumerState<VisionScreen>
                 ),
                 const SizedBox(height: 12),
                 Text(selected.note.isEmpty ? '점검 메모 없음' : selected.note),
+                if (selected.front.isNotEmpty) ...[
+                  const SizedBox(height: 12),
+                  FrontPhoto(path: selected.imagePath, observations: selected.front),
+                  for (final part in FrontPart.values)
+                    if (selected.front[part] case final observation?)
+                      Text('${part.number}. ${part.label} · ${observation.status.label}'),
+                ],
                 const SizedBox(height: 18),
                 Wrap(
                   spacing: 12,

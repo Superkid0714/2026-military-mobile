@@ -7,11 +7,30 @@ import 'package:intl/intl.dart';
 import '../data/store.dart';
 import '../design_assets.dart';
 
-const green = Color(0xFF03C75A),
+const green = Color(0xFF00733B),
     ink = Color(0xFF191C1D),
     muted = Color(0xFF66727E),
     line = Color(0xFFE2E7EB),
     surface = Color(0xFFF4F6F8);
+// Presentation labels do not alter source values or vehicle identity.
+String modelLabel(String model) =>
+    model.replaceFirst(RegExp(r'\s*\(가상\)$'), '');
+String predictionTriggerLabel(String trigger) =>
+    trigger == '목업 갱신' ? '분석 데이터 갱신' : trigger;
+
+String maintenanceDescriptionLabel(Maintenance record) =>
+    record.vehicleId.startsWith('MOCK-')
+    ? record.description.replaceFirst(RegExp(r'^목업 기록:\s*'), '')
+    : record.description;
+
+String plainMessage(String text) => text
+    .replaceAll('부품 개념', '부품 이름')
+    .replaceAll('머신러닝', '이전 기록 분석')
+    .replaceAll('선도래 순서 확인 불가', '거리와 날짜 중 무엇이 먼저인지 확인할 기록이 부족합니다.');
+
+String vehicleLabel(String value) =>
+    value.replaceAllMapped(RegExp(r'MOCK-OPS-(\d+)'), (m) => '운용 ${m[1]}호');
+
 String number(num v) => NumberFormat.decimalPattern('ko').format(v);
 String day(DateTime v) => DateFormat('yyyy.MM.dd').format(v);
 String statusLabel(VehicleStatus s) => ['낮음', '관찰', '높음', '미분석'][s.index];
@@ -92,7 +111,7 @@ class Panel extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      title,
+                      vehicleLabel(title),
                       style: const TextStyle(
                         fontSize: 15,
                         fontWeight: FontWeight.w700,
@@ -133,10 +152,12 @@ class DataScopeNotice extends StatelessWidget {
     final scope = ids.isEmpty
         ? '차량 없음'
         : examples == 0
-        ? '등록 차량 $registered대 · 합성 고장확률 미적용'
+        ? '등록 차량 $registered대'
         : registered == 0
-        ? '예제 차량 $examples대 · 실사용 자료와 구분'
-        : '등록 차량 $registered대 · 예제 차량 $examples대 혼합';
+        ? ids.every((id) => id.startsWith('MOCK-OPS-'))
+              ? '운용 예시 $examples대'
+              : '분석용 차량 $examples대'
+        : '등록 차량 $registered대 · 분석용 차량 $examples대 혼합';
     return Align(
       alignment: Alignment.centerLeft,
       child: Container(
@@ -178,7 +199,7 @@ class PageTitle extends StatelessWidget {
             const SizedBox(width: 10),
             Expanded(
               child: Text(
-                title,
+                vehicleLabel(title),
                 style: const TextStyle(
                   fontSize: 24,
                   fontWeight: FontWeight.w800,
@@ -188,14 +209,16 @@ class PageTitle extends StatelessWidget {
             ?action,
           ],
         ),
-        const SizedBox(height: 5),
-        Align(
-          alignment: Alignment.centerLeft,
-          child: Text(
-            description,
-            style: const TextStyle(fontSize: 12, color: muted),
+        if (description.isNotEmpty) ...[
+          const SizedBox(height: 5),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: Text(
+              description,
+              style: const TextStyle(fontSize: 12, color: muted),
+            ),
           ),
-        ),
+        ],
         if (scopeVehicles != null) ...[
           const SizedBox(height: 8),
           DataScopeNotice(scopeVehicles!, label: scopeLabel),
@@ -295,7 +318,7 @@ class SummaryCards extends StatelessWidget {
                   total
                       ? '미분석 ${vehicles.where((v) => !v.predictionReady).length}대 포함'
                       : i == 3
-                      ? '목업 추정치 분류'
+                      ? 'AI 점수 기준'
                       : '전체의 ${vehicles.isEmpty ? 0 : (count / vehicles.length * 100).round()}%',
                   style: TextStyle(
                     fontSize: 11,
@@ -325,13 +348,16 @@ class DataGrid extends StatelessWidget {
   Widget build(BuildContext context) => LayoutBuilder(
     builder: (context, c) => SingleChildScrollView(
       scrollDirection: Axis.horizontal,
-      child: SizedBox(
-        width: math.max(c.maxWidth, minWidth),
+      child: ConstrainedBox(
+        constraints: BoxConstraints(minWidth: math.max(c.maxWidth, minWidth)),
         child: DataTable(
           headingRowColor: const WidgetStatePropertyAll(Color(0xFFF8F9FA)),
-          headingRowHeight: 42,
+          headingRowHeight: math.max(
+            42,
+            MediaQuery.textScalerOf(context).scale(16) + 20,
+          ),
           dataRowMinHeight: 52,
-          dataRowMaxHeight: 66,
+          dataRowMaxHeight: double.infinity,
           columnSpacing: 18,
           horizontalMargin: 12,
           border: const TableBorder(horizontalInside: BorderSide(color: line)),
@@ -340,6 +366,7 @@ class DataGrid extends StatelessWidget {
                 (s) => DataColumn(
                   label: Text(
                     s,
+                    softWrap: false,
                     style: const TextStyle(
                       color: muted,
                       fontSize: 11,
@@ -362,7 +389,7 @@ class DataGrid extends StatelessWidget {
 }
 
 Widget cell(String text, {bool bold = false, Color? color}) => Text(
-  text,
+  plainMessage(vehicleLabel(text)),
   style: TextStyle(
     fontSize: 12,
     fontWeight: bold ? FontWeight.w700 : FontWeight.w400,
@@ -372,7 +399,7 @@ Widget cell(String text, {bool bold = false, Color? color}) => Text(
 Widget empty(String message) => Padding(
   padding: const EdgeInsets.symmetric(vertical: 36),
   child: Center(
-    child: Text(message, style: const TextStyle(color: muted)),
+    child: Text(plainMessage(message), style: const TextStyle(color: muted)),
   ),
 );
 Widget note(String message, {Color color = green}) => Container(
@@ -384,7 +411,7 @@ Widget note(String message, {Color color = green}) => Container(
     border: Border(left: BorderSide(color: color, width: 3)),
   ),
   child: Text(
-    message,
+    plainMessage(message),
     style: TextStyle(fontSize: 12, color: color == green ? muted : color),
   ),
 );

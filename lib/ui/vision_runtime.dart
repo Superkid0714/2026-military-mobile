@@ -79,7 +79,7 @@ class _VisionRuntimeState extends ConsumerState<VisionRuntimePanel> {
           .saveInspection(widget.inspection, confirmedConceptId: selection);
       if (mounted) setState(() => confirmed = false);
     } catch (_) {
-      if (mounted) setState(() => error = '부품 개념 확인을 저장하지 못했습니다.');
+      if (mounted) setState(() => error = '부품 이름 확인을 저장하지 못했습니다.');
     } finally {
       if (mounted) setState(() => busy = false);
     }
@@ -99,7 +99,7 @@ class _VisionRuntimeState extends ConsumerState<VisionRuntimePanel> {
         : visionConceptCandidates(analysis, store.supportLibrary.knowledge);
     final concepts = store.supportLibrary.knowledge.concepts;
     return Panel(
-      title: '공개 Vision 실행 시험 · 부품 개념 확인',
+      title: '사진 속 물체 찾기 · 부품 이름 확인',
       subtitle: '렉스턴 부품 탐지 성능은 검증하지 않았습니다. 탐지 클래스는 자동 확정되지 않습니다.',
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -111,7 +111,7 @@ class _VisionRuntimeState extends ConsumerState<VisionRuntimePanel> {
                     runtime.device?.cameraAvailable != true
                 ? null
                 : detect,
-            child: Text(busy ? '모델 작업 중…' : '저장 이미지로 공개 탐지 모델 시험'),
+            child: Text(busy ? '사진을 확인하는 중…' : '저장한 사진에서 물체 찾기'),
           ),
           if (runtime.cameraBlocked || runtime.device?.cameraAvailable != true)
             const Text('카메라 사용 조건 미충족 · Vision 실행을 끄고 수동 부품 선택을 유지합니다.'),
@@ -119,13 +119,13 @@ class _VisionRuntimeState extends ConsumerState<VisionRuntimePanel> {
           if (analysis != null) ...[
             for (final d in analysis.detections)
               Text(
-                'COCO ${d.classId} · ${d.label} · 모델 점수 ${d.score.toStringAsFixed(3)}',
+                '사진에서 찾은 물체: ${photoObjectLabel(d.classId)} · 참고 점수 ${(d.score * 100).round()}점',
               ),
             if (candidates.isEmpty)
-              const Text('확인된 부품 개념 대응이 없습니다. 아래에서 수동 선택해 주세요.'),
+              const Text('사진에서 부품 이름을 정하지 못했습니다. 아래에서 선택해 주세요.'),
             if (candidates.isNotEmpty)
               Text(
-                '개념 후보: ${candidates.map((c) => c['name']).join(' · ')} · 사용자 확인 필요',
+                '부품 후보: ${candidates.map((c) => c['name']).join(' · ')} · 사용자 확인 필요',
               ),
           ],
           if (i.confirmedConceptId != null)
@@ -134,7 +134,7 @@ class _VisionRuntimeState extends ConsumerState<VisionRuntimePanel> {
             DropdownButtonFormField<String>(
               key: ValueKey('vision-concept-${i.id}-$selection'),
               initialValue: selection,
-              decoration: const InputDecoration(labelText: '부품 개념 수동 선택'),
+              decoration: const InputDecoration(labelText: '부품 이름 수동 선택'),
               items: [
                 for (final c in concepts)
                   DropdownMenuItem(
@@ -152,8 +152,8 @@ class _VisionRuntimeState extends ConsumerState<VisionRuntimePanel> {
             CheckboxListTile(
               key: const ValueKey('vision-confirm-concept'),
               contentPadding: EdgeInsets.zero,
-              title: const Text('이 점검 사진과 선택한 부품 개념의 연결을 확인했습니다'),
-              subtitle: const Text('품번·적용조건 확정이나 모델의 자동 판정이 아닙니다.'),
+              title: const Text('이 점검 사진과 선택한 부품 이름의 연결을 확인했습니다'),
+              subtitle: const Text('부품번호와 이 차량에 맞는지는 별도로 확인해 주세요.'),
               value: confirmed,
               onChanged: selection == null || busy
                   ? null
@@ -162,7 +162,7 @@ class _VisionRuntimeState extends ConsumerState<VisionRuntimePanel> {
             FilledButton(
               key: const ValueKey('vision-save-concept'),
               onPressed: !confirmed || busy ? null : save,
-              child: const Text('부품 개념 확인 저장'),
+              child: const Text('부품 이름 확인 저장'),
             ),
           ],
           if (i.confirmedConceptId != null)
@@ -176,3 +176,15 @@ class _VisionRuntimeState extends ConsumerState<VisionRuntimePanel> {
     );
   }
 }
+
+String photoObjectLabel(int id) => switch (id) {
+  1 => '사람',
+  2 => '자전거',
+  3 => '승용차',
+  4 => '오토바이',
+  6 => '버스',
+  8 => '화물차',
+  17 => '고양이',
+  18 => '개',
+  _ => '물체',
+};

@@ -1,9 +1,18 @@
+import 'maintenance_loading.dart';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../data/adaptive_runtime.dart';
+import '../data/offline_assistant.dart';
 import '../data/store.dart';
 import 'components.dart';
+import 'manual_page_image.dart';
+
+final offlineAssistantProvider = Provider<OfflineAssistant>(
+  (ref) => OfflineAssistant.local(ref.read(adaptiveRuntimeProvider)),
+);
 
 class ChatScreen extends ConsumerStatefulWidget {
   const ChatScreen({this.vehicleId, super.key});
@@ -14,249 +23,396 @@ class ChatScreen extends ConsumerStatefulWidget {
 
 class _ChatState extends ConsumerState<ChatScreen> {
   final question = TextEditingController();
-  String? vehicle, answer;
+  final scroll = ScrollController();
+  final replies = <OfflineReply>[];
+  String? vehicle, error, pending;
   bool sending = false;
-  int tab = 0;
+
   @override
   void dispose() {
     question.dispose();
+    scroll.dispose();
     super.dispose();
   }
 
-  Future<void> ask() async {
-    if (question.text.trim().isEmpty) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('증상을 입력해 주세요.')));
-      return;
+  void bottom() => WidgetsBinding.instance.addPostFrameCallback((_) {
+    if (mounted && scroll.hasClients) {
+      scroll.animateTo(
+        scroll.position.maxScrollExtent,
+        duration: const Duration(milliseconds: 250),
+        curve: Curves.easeOut,
+      );
     }
-    setState(() => sending = true);
+  });
+
+  Future<void> ask() async {
+    final q = question.text.trim(), id = vehicle;
+    if (sending || id == null || q.isEmpty) return;
+    final store = ref.read(storeProvider);
+    final assistant = ref.read(offlineAssistantProvider);
+    final previous = replies.lastOrNull?.searchQuestion;
+    setState(() {
+      sending = true;
+      error = null;
+      pending = q;
+    });
+    question.clear();
+    bottom();
     try {
-      await ref
-          .read(storeProvider)
-          .saveQuestion(vehicle!, question.text.trim());
-      if (mounted) setState(() => answer = question.text.trim());
+      final reply = await assistant.ask(
+        store,
+        id,
+        q,
+        previousQuestion: previous,
+      );
+      var saved = true;
+      try {
+        await store.saveQuestion(id, q);
+      } catch (_) {
+        saved = false;
+      }
+      if (!mounted) return;
+      setState(() {
+        replies.add(reply);
+        if (replies.length > 20) replies.removeAt(0);
+        if (!saved) {
+          error = '답변은 표시했지만 질문 기록을 저장하지 못했습니다.';
+        }
+      });
     } catch (_) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('질문 기록을 저장하지 못했습니다. 다시 시도해 주세요.')),
-        );
+        setState(() {
+          error = '답변을 준비하지 못했습니다. 질문을 다시 보내 주세요.';
+          question.text = q;
+        });
       }
     } finally {
-      if (mounted) setState(() => sending = false);
+      if (mounted) {
+        setState(() {
+          sending = false;
+          pending = null;
+        });
+        bottom();
+      }
     }
   }
+
+  void source(MaintenanceEvidence e) => showDialog<void>(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: Text('${e.title} · ${e.location}'),
+      content: SizedBox(
+        width: 760,
+        child: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (e.sourceRef?['textMethod'] == 'ocr')
+                const Text('검색용 문자인식 결과입니다. 핀번호·배선색은 도면 원본에서 확인해 주세요.'),
+              SelectableText(e.text),
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('닫기'),
+        ),
+      ],
+    ),
+  );
+
+  Widget answer(OfflineReply reply) => Panel(
+    title: '정비 도우미',
+    subtitle: '기기 내 분석 · 차량 ${reply.vehicleId}',
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        SelectableText(reply.text, style: const TextStyle(height: 1.6)),
+        if (reply.searchQuestion != reply.question)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Text(
+              '이전 질문을 이어서 확인했습니다.',
+              style: const TextStyle(color: muted, fontSize: 12),
+            ),
+          ),
+        if (reply.priorities.isNotEmpty)
+          ExpansionTile(
+            tilePadding: EdgeInsets.zero,
+            title: const Text('점검 순서와 이유'),
+            subtitle: const Text('판단에 사용한 등록 기준 보기'),
+            children: [
+              for (final entry in reply.priorities.asMap().entries)
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: CircleAvatar(
+                    radius: 16,
+                    child: Text('${entry.key + 1}'),
+                  ),
+                  title: Text(entry.value.part),
+                  subtitle: Text(entry.value.reason),
+                ),
+            ],
+          ),
+        if (reply.excerpts.isNotEmpty) ...[
+          const SizedBox(height: 16),
+          const Text('쉽게 설명하면', style: TextStyle(fontWeight: FontWeight.w700)),
+          for (var i = 0; i < reply.excerpts.length; i++) ...[
+            const SizedBox(height: 12),
+            SelectableText(
+              reply.explanations.length > i
+                  ? reply.explanations[i]
+                  : reply.excerpts[i].quote,
+              style: const TextStyle(fontSize: 15, height: 1.7),
+            ),
+            TextButton(
+              onPressed: () => source(
+                reply.evidence.firstWhere(
+                  (e) => e.id == reply.excerpts[i].citation,
+                ),
+              ),
+              child: Text(
+                '출처: ${reply.evidence.firstWhere((e) => e.id == reply.excerpts[i].citation).location}',
+              ),
+            ),
+          ],
+          if (reply.wordHelp.isNotEmpty)
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: surface,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    '용어 풀이',
+                    style: TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                  for (final entry in reply.wordHelp.entries)
+                    Text(
+                      '${entry.key}: ${entry.value}',
+                      style: const TextStyle(height: 1.6),
+                    ),
+                ],
+              ),
+            ),
+          ExpansionTile(
+            tilePadding: EdgeInsets.zero,
+            title: const Text('책자 표현 그대로 보기'),
+            children: [
+              for (final excerpt in reply.excerpts)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: SelectableText(excerpt.quote),
+                ),
+            ],
+          ),
+        ],
+        if (reply.excerpts.isNotEmpty ||
+            reply.evidence.any((e) => e.sourceRef?['textMethod'] == 'ocr')) ...[
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 12,
+            runSpacing: 12,
+            children: [
+              for (final e
+                  in reply.evidence
+                      .where(
+                        (e) =>
+                            (reply.excerpts.isEmpty &&
+                                e.sourceRef?['textMethod'] == 'ocr') ||
+                            reply.excerpts.any((s) => s.citation == e.id),
+                      )
+                      .take(2))
+                ManualPageImageCard(
+                  e,
+                  key: ValueKey('page-image-${e.id}-${e.sourceRef?['sha256']}'),
+                ),
+            ],
+          ),
+        ],
+        if (reply.evidence.isNotEmpty)
+          ExpansionTile(
+            tilePadding: EdgeInsets.zero,
+            title: Text('관련 책자 ${reply.evidence.length}개'),
+            children: [
+              for (final e in reply.evidence)
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: const Icon(Icons.menu_book_outlined),
+                  title: Text(e.title),
+                  subtitle: Text(e.location),
+                  trailing: const Icon(Icons.open_in_new),
+                  onTap: () => source(e),
+                ),
+            ],
+          ),
+        if (reply.history.isNotEmpty)
+          ExpansionTile(
+            tilePadding: EdgeInsets.zero,
+            title: Text('관련 정비 이력 ${reply.history.length}건'),
+            children: [
+              for (final r in reply.history)
+                ListTile(
+                  title: Text('${r.date} · ${r.part}'),
+                  subtitle: Text(maintenanceDescriptionLabel(r)),
+                  onTap: () => context.go('/records/${r.id}'),
+                ),
+            ],
+          ),
+        for (final notice in reply.notices)
+          Padding(
+            padding: const EdgeInsets.only(top: 12),
+            child: Text(notice, style: const TextStyle(color: muted)),
+          ),
+      ],
+    ),
+  );
 
   @override
   Widget build(BuildContext context) {
     final s = ref.watch(storeProvider);
-    vehicle ??= s.vehicles.any((v) => v.id == widget.vehicleId)
+    final vehicles = s.vehicles;
+    if (vehicles.isEmpty) return empty('차량을 등록한 뒤 질문해 주세요.');
+    vehicle ??= vehicles.any((v) => v.id == widget.vehicleId)
         ? widget.vehicleId
-        : s.vehicles.first.id;
-    return ListView(
+        : s.activeVehicles.first.id;
+    if (!vehicles.any((v) => v.id == vehicle)) {
+      vehicle = s.activeVehicles.first.id;
+      replies.clear();
+    }
+    final selected = s.vehicle(vehicle!);
+    return Column(
       children: [
-        const PageTitle('정비지원 챗봇', '고장 증상과 정비 이력을 연결하여 정비를 지원합니다.'),
-        note(
-          '교범과 답변 생성 모델을 연결하기 전입니다. 질문 저장·관련 정비이력 조회를 사용할 수 있으며, 실제 AI 답변이나 교범 인용은 생성하지 않습니다.',
-          color: Colors.orange,
-        ),
-        const SizedBox(height: 16),
-        if (answer == null)
-          ResponsiveColumns(
-            breakpoint: 850,
-            flexes: const [1, 2],
+        Expanded(
+          child: ListView(
+            controller: scroll,
             children: [
-              Panel(
-                title: '최근 질문',
-                subtitle: '기기에 저장된 질문 기록',
-                child: s.questions.isEmpty
-                    ? empty('저장된 질문이 없습니다.')
-                    : Column(
-                        children: s.questions
-                            .take(6)
-                            .map(
-                              (q) => ListTile(
-                                contentPadding: EdgeInsets.zero,
-                                title: Text(
-                                  q['question'],
-                                  maxLines: 2,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.w700,
-                                    fontSize: 13,
-                                  ),
-                                ),
-                                subtitle: Text(
-                                  '${q['vehicleId']} · ${q['created'].toString().substring(0, 10)}',
-                                  style: const TextStyle(fontSize: 11),
-                                ),
-                                onTap: () => setState(() {
-                                  vehicle = q['vehicleId'];
-                                  answer = q['question'];
-                                }),
-                              ),
-                            )
-                            .toList(),
-                      ),
+              PageTitle(
+                '정비 도우미',
+                '',
+                scopeVehicles: [selected],
               ),
-              Panel(
-                title: '새 질문',
-                subtitle: '발생 시점, 계기판 표시, 소음·진동 여부를 함께 입력해 주세요.',
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    DropdownButtonFormField<String>(
-                      initialValue: vehicle,
-                      items: s.vehicles
-                          .map(
-                            (v) => DropdownMenuItem(
-                              value: v.id,
-                              child: Text('${v.id} · ${v.model}'),
+              DropdownButtonFormField<String>(
+                key: ValueKey(vehicle),
+                initialValue: vehicle,
+                isExpanded: true,
+                decoration: const InputDecoration(labelText: '질문할 차량'),
+                items: [
+                  for (final v in vehicles)
+                    DropdownMenuItem(
+                      value: v.id,
+                      child: Text(
+                        '${vehicleLabel(v.id)} · ${modelLabel(v.model)}',
+                      ),
+                    ),
+                ],
+                onChanged: sending
+                    ? null
+                    : (id) => setState(() {
+                        vehicle = id;
+                        replies.clear();
+                        error = null;
+                        question.clear();
+                      }),
+              ),
+              const SizedBox(height: 16),
+              if (replies.isEmpty && pending == null) ...[
+                Panel(
+                  title: '질문 예시',
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: [
+                          for (final sample in [
+                            '무엇부터 점검해야 해?',
+                            '최근 정비 이력을 알려줘',
+                            '브레이크 패드를 분리할 때 주의사항은?',
+                          ])
+                            ActionChip(
+                              label: Text(sample),
+                              onPressed: () =>
+                                  setState(() => question.text = sample),
                             ),
-                          )
-                          .toList(),
-                      onChanged: (v) => setState(() => vehicle = v),
-                    ),
-                    const SizedBox(height: 16),
-                    TextField(
-                      controller: question,
-                      maxLines: 8,
-                      maxLength: 1000,
-                      onChanged: (_) => setState(() {}),
-                      decoration: const InputDecoration(
-                        labelText: '증상 입력',
-                        hintText: '예) 시동이 걸리지 않습니다.',
+                        ],
                       ),
-                    ),
-                    const SizedBox(height: 18),
-                    FilledButton.icon(
-                      onPressed: sending ? null : ask,
-                      icon: const DesignIcon('1:3389', 'imgArrowUp'),
-                      label: Text(sending ? '저장 중…' : '질문 기록 및 관련 이력 보기'),
-                    ),
-                    const SizedBox(height: 18),
-                    note('현장 점검과 실제 조치는 정비 담당자의 확인이 필요합니다.'),
-                  ],
+                    ],
+                  ),
                 ),
-              ),
-            ],
-          )
-        else ...[
-          ResponsiveColumns(
-            breakpoint: 850,
-            flexes: const [3, 2],
-            children: [
-              Panel(
-                title: '질문 및 지원 상태',
-                subtitle: '차량 $vehicle · 기기 내 저장',
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    note(answer!),
-                    const SizedBox(height: 20),
-                    const Row(
-                      children: [
-                        DesignIcon('1:3552', 'imgBot', size: 26),
-                        SizedBox(width: 10),
-                        Text(
-                          '정비지원 AI',
-                          style: TextStyle(fontWeight: FontWeight.w800),
-                        ),
-                      ],
+                const SizedBox(height: 12),
+              ],
+              for (final reply in replies) ...[
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: Container(
+                    constraints: const BoxConstraints(maxWidth: 760),
+                    padding: const EdgeInsets.all(16),
+                    margin: const EdgeInsets.only(bottom: 12),
+                    decoration: BoxDecoration(
+                      color: green.withValues(alpha: .08),
+                      borderRadius: BorderRadius.circular(12),
                     ),
-                    const SizedBox(height: 14),
-                    const Text(
-                      '답변 생성 대기',
-                      style: TextStyle(
-                        fontWeight: FontWeight.w800,
-                        fontSize: 22,
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-                    const Text(
-                      '실제 교범과 모델이 연결되면 근거가 있는 답변을 표시합니다. 현재는 관련 차량의 저장된 정비 기록을 확인할 수 있습니다.',
-                      style: TextStyle(color: muted, height: 1.8),
-                    ),
-                    const SizedBox(height: 24),
-                    note(
-                      '교범 원문이 없어 문서명·페이지를 임의로 인용하지 않습니다.',
-                      color: Colors.orange,
-                    ),
-                  ],
+                    child: SelectableText(reply.question),
+                  ),
                 ),
-              ),
-              Panel(
-                title: tab == 0 ? '근거 교범' : '관련 정비이력',
-                action: Wrap(
-                  children: [
-                    TextButton(
-                      onPressed: () => setState(() => tab = 0),
-                      child: const Text('교범'),
-                    ),
-                    TextButton(
-                      onPressed: () => setState(() => tab = 1),
-                      child: const Text('이력'),
-                    ),
-                  ],
-                ),
-                child: tab == 0
-                    ? empty('등록된 교범이 없습니다.')
-                    : s.history(vehicle!).isEmpty
-                    ? empty('관련 정비 기록이 없습니다.')
-                    : Column(
-                        children: s
-                            .history(vehicle!)
-                            .map(
-                              (r) => ListTile(
-                                contentPadding: EdgeInsets.zero,
-                                title: Text(
-                                  r.part,
-                                  style: const TextStyle(
-                                    fontSize: 13,
-                                    fontWeight: FontWeight.w700,
-                                  ),
-                                ),
-                                subtitle: Text(
-                                  '${r.date}\n${r.description}',
-                                  style: const TextStyle(fontSize: 12),
-                                ),
-                                isThreeLine: true,
-                                onTap: () => context.go('/records/${r.id}'),
-                              ),
-                            )
-                            .toList(),
-                      ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          Panel(
-            title: '연결 액션',
-            child: Wrap(
-              spacing: 12,
-              runSpacing: 12,
-              children: [
-                OutlinedButton.icon(
-                  onPressed: () => setState(() {
-                    answer = null;
-                    question.clear();
-                  }),
-                  icon: const DesignIcon('1:3552', 'imgMessageCirclePlus'),
-                  label: const Text('추가 질문'),
-                ),
-                OutlinedButton.icon(
-                  onPressed: () => context.go('/vehicles/$vehicle'),
-                  icon: const DesignIcon('1:3552', 'imgTruck1'),
-                  label: const Text('차량 상세 보기'),
-                ),
-                FilledButton.icon(
-                  onPressed: () => context.go('/entry?vehicle=$vehicle'),
-                  icon: const DesignIcon('1:3552', 'imgClipboardPlus'),
-                  label: const Text('정비 기록 등록'),
+                answer(reply),
+                const SizedBox(height: 20),
+              ],
+              if (sending) ...[
+                Text(pending ?? ''),
+                const SizedBox(height: 8),
+                const MaintenanceLoading(
+                  detail: '질문에 맞는 차량 기록과 책자 근거를 찾고 있어요.',
                 ),
               ],
-            ),
+              if (error != null)
+                Padding(padding: const EdgeInsets.all(12), child: Text(error!)),
+            ],
           ),
-        ],
+        ),
+        const SizedBox(height: 12),
+        TextField(
+          controller: question,
+          enabled: !sending,
+          minLines: 1,
+          maxLines: 3,
+          maxLength: 500,
+          key: const ValueKey('assistant-question'),
+          decoration: const InputDecoration(
+            labelText: '정비 도우미에게 질문하기',
+            hintText: '예: 이 차량은 무엇부터 점검해야 해?',
+          ),
+          onChanged: (_) => setState(() {}),
+        ),
+        Row(
+          children: [
+            TextButton(
+              onPressed: sending || replies.isEmpty
+                  ? null
+                  : () => setState(() {
+                      replies.clear();
+                      error = null;
+                    }),
+              child: const Text('새 대화'),
+            ),
+            const Spacer(),
+            FilledButton.icon(
+              key: const ValueKey('assistant-send'),
+              onPressed: !sending && question.text.trim().isNotEmpty
+                  ? ask
+                  : null,
+              icon: const Icon(Icons.send),
+              label: Text(sending ? '확인 중…' : '보내기'),
+            ),
+          ],
+        ),
       ],
     );
   }

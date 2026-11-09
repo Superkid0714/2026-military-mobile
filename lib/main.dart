@@ -1,3 +1,6 @@
+import 'ui/onboarding.dart';
+import 'ui/maintenance_loading.dart';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -11,8 +14,12 @@ import 'ui/management.dart';
 import 'ui/workflow_home.dart';
 import 'ui/entry.dart';
 import 'ui/vision.dart';
+import 'data/front_inspection.dart';
+import 'ui/front_inspection.dart';
 import 'ui/support.dart';
 import 'ui/data_tools.dart';
+import 'ui/manual_search.dart';
+import 'ui/chat.dart';
 import 'ui/setup.dart';
 import 'rag_device_probe.dart';
 import 'optional_model_device_probe.dart';
@@ -22,6 +29,24 @@ import 'system_pilot_device_probe.dart';
 import 'rag_utility_device_probe.dart';
 import 'memory_warning_device_probe.dart';
 import 'ml_device_probe.dart';
+import 'pdf_reference_device_probe.dart';
+import 'manual_rag_device_probe.dart';
+import 'offline_chat_device_probe.dart';
+
+@pragma('vm:entry-point')
+void offlineChatDeviceProbe() {
+  runOfflineChatDeviceProbe();
+}
+
+@pragma('vm:entry-point')
+void manualRagDeviceProbe() {
+  runManualRagDeviceProbe();
+}
+
+@pragma('vm:entry-point')
+void pdfReferenceDeviceProbe() {
+  runPdfReferenceDeviceProbe();
+}
 
 @pragma('vm:entry-point')
 void mlDeviceProbe() {
@@ -71,6 +96,17 @@ void main() {
 final appRouter = GoRouter(
   initialLocation: '/',
   routes: [
+    GoRoute(
+      path: '/welcome',
+      builder: (context, state) => OnboardingScreen(
+        onComplete: () async {
+          await ProviderScope.containerOf(context)
+              .read(storeProvider)
+              .completeOnboarding();
+          if (context.mounted) context.go('/');
+        },
+      ),
+    ),
     ShellRoute(
       builder: (context, state, child) =>
           AppShell(location: state.uri.path, child: child),
@@ -163,10 +199,27 @@ final appRouter = GoRouter(
           ),
         ),
         GoRoute(
+          path: '/manual-search',
+          builder: (context, state) => ManualSearchScreen(
+            key: ValueKey(state.uri.toString()),
+            initialQuery: state.uri.queryParameters['query'] ?? '',
+          ),
+        ),
+        GoRoute(
           path: '/plans',
           builder: (context, state) => MaintenancePlanScreen(
             key: ValueKey(state.uri.toString()),
             vehicleId: state.uri.queryParameters['vehicle'],
+          ),
+        ),
+        GoRoute(
+          path: '/front-map',
+          builder: (context, state) => FrontMapScreen(
+            key: ValueKey(state.uri.toString()),
+            vehicleId: state.uri.queryParameters['vehicle'],
+            initialArea: state.uri.queryParameters['area'] == 'engineBay'
+                ? FrontInspectionArea.engineBay
+                : FrontInspectionArea.exterior,
           ),
         ),
         GoRoute(
@@ -175,16 +228,19 @@ final appRouter = GoRouter(
             key: ValueKey(state.uri.toString()),
             vehicleId: state.uri.queryParameters['vehicle'],
             sessionId: state.uri.queryParameters['session'],
+            inspectionArea: state.uri.queryParameters['front'] != '1'
+                ? null
+                : state.uri.queryParameters['area'] == 'engineBay'
+                ? FrontInspectionArea.engineBay
+                : FrontInspectionArea.exterior,
             part: state.uri.queryParameters['part'],
           ),
         ),
         GoRoute(
           path: '/chat',
-          builder: (context, state) => SupportScreen(
+          builder: (context, state) => ChatScreen(
             key: ValueKey(state.uri.toString()),
             vehicleId: state.uri.queryParameters['vehicle'],
-            part: state.uri.queryParameters['part'],
-            inspectionId: state.uri.queryParameters['inspection'],
           ),
         ),
       ],
@@ -204,7 +260,7 @@ class MilitaryApp extends StatelessWidget {
   const MilitaryApp({super.key});
   @override
   Widget build(BuildContext context) => MaterialApp.router(
-    title: '기동장비 정비관리',
+    title: '정비온',
     debugShowCheckedModeBanner: false,
     locale: const Locale('ko'),
     supportedLocales: const [Locale('ko')],
@@ -275,7 +331,7 @@ class _AppShellState extends ConsumerState<AppShell>
     Future.microtask(() {
       ref.read(adaptiveRuntimeProvider).initialize();
       final store = ref.read(storeProvider);
-      if (!store.ready) store.initialize();
+      if (!store.ready) store.initialize(populatePresentation: true);
     });
   }
 
@@ -307,121 +363,135 @@ class _AppShellState extends ConsumerState<AppShell>
   @override
   Widget build(BuildContext context) {
     final store = ref.watch(storeProvider);
+    final runtime = ref.watch(adaptiveRuntimeProvider);
+    if (store.ready && !store.onboardingCompleted) {
+      return OnboardingScreen(onComplete: store.completeOnboarding);
+    }
     return LayoutBuilder(
       builder: (context, c) {
         final wide = c.maxWidth >= 1000, compact = c.maxWidth >= 700;
         return Scaffold(
           key: scaffoldKey,
           drawer: wide ? null : Drawer(width: 230, child: _sidebar()),
-          body: SafeArea(
-            child: Row(
-              children: [
-                if (wide) SizedBox(width: 216, child: _sidebar()),
-                Expanded(
-                  child: Column(
-                    children: [
-                      Container(
-                        height: 72,
-                        padding: EdgeInsets.symmetric(
-                          horizontal: compact ? 28 : 12,
-                        ),
-                        decoration: const BoxDecoration(
-                          color: Colors.white,
-                          border: Border(bottom: BorderSide(color: line)),
-                        ),
-                        child: Row(
-                          children: [
-                            if (!wide)
-                              IconButton(
-                                onPressed: () =>
-                                    scaffoldKey.currentState!.openDrawer(),
-                                icon: const Icon(Icons.menu),
-                              ),
-                            const Expanded(
-                              child: Column(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    'AI 기동장비 정비관리 시스템',
-                                    style: TextStyle(
-                                      fontSize: 16,
-                                      fontWeight: FontWeight.w800,
-                                    ),
-                                  ),
-                                  SizedBox(height: 5),
-                                  SizedBox(
-                                    width: 52,
-                                    child: Divider(
-                                      color: green,
-                                      thickness: 2,
-                                      height: 2,
-                                    ),
-                                  ),
-                                ],
-                              ),
+          body: Stack(
+            children: [
+              SafeArea(
+                child: Row(
+                  children: [
+                    if (wide) SizedBox(width: 216, child: _sidebar()),
+                    Expanded(
+                      child: Column(
+                        children: [
+                          Container(
+                            constraints: const BoxConstraints(minHeight: 64),
+                            padding: EdgeInsets.symmetric(
+                              horizontal: compact ? 28 : 12,
+                              vertical: 8,
                             ),
-                            if (compact) ...[
-                              const Text(
-                                '● 로컬 실행 중',
-                                style: TextStyle(color: green, fontSize: 11),
-                              ),
-                              const SizedBox(width: 20),
-                              Text(
-                                day(ref.watch(currentTimeProvider)),
-                                style: const TextStyle(
-                                  color: muted,
-                                  fontSize: 11,
-                                ),
-                              ),
-                              const SizedBox(width: 18),
-                            ],
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 8,
-                                vertical: 5,
-                              ),
-                              decoration: BoxDecoration(
-                                color: ink,
-                                borderRadius: BorderRadius.circular(5),
-                              ),
-                              child: const Text(
-                                '현장 모드',
-                                style: TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 11,
-                                ),
-                              ),
+                            decoration: const BoxDecoration(
+                              color: Colors.white,
+                              border: Border(bottom: BorderSide(color: line)),
                             ),
-                          ],
-                        ),
-                      ),
-                      Expanded(
-                        child: !store.ready
-                            ? Center(
-                                child: store.error == null
-                                    ? const CircularProgressIndicator()
-                                    : Column(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          Text(store.error!),
-                                          TextButton(
-                                            onPressed: () => store.initialize(),
-                                            child: const Text('다시 시도'),
-                                          ),
-                                        ],
+                            child: Row(
+                              children: [
+                                if (!wide)
+                                  IconButton(
+                                    onPressed: () =>
+                                        scaffoldKey.currentState!.openDrawer(),
+                                    icon: const Icon(Icons.menu),
+                                    tooltip: '메뉴 열기',
+                                  ),
+                                const Expanded(
+                                  child: Column(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        '정비온',
+                                        style: TextStyle(
+                                          fontSize: 16,
+                                          fontWeight: FontWeight.w800,
+                                        ),
                                       ),
-                              )
-                            : Padding(
-                                padding: EdgeInsets.all(compact ? 24 : 14),
-                                child: widget.child,
-                              ),
+                                      SizedBox(height: 5),
+                                      SizedBox(
+                                        width: 52,
+                                        child: Divider(
+                                          color: green,
+                                          thickness: 2,
+                                          height: 2,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                if (compact &&
+                                    MediaQuery.textScalerOf(context).scale(12) <= 18)
+                                  Text(
+                                    day(ref.watch(currentTimeProvider)),
+                                    style: const TextStyle(
+                                      color: muted,
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          ),
+                          Expanded(
+                            child: !store.ready
+                                ? Center(
+                                    child: store.error == null
+                                        ? const MaintenanceLoading(
+                                            detail: '차량 기록과 정비 정보를 준비하고 있어요.',
+                                            immediate: true,
+                                          )
+                                        : Column(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              Text(store.error!),
+                                              TextButton(
+                                                onPressed: () =>
+                                                    store.initialize(
+                                                      populatePresentation:
+                                                          true,
+                                                    ),
+                                                child: const Text('다시 시도'),
+                                              ),
+                                            ],
+                                          ),
+                                  )
+                                : Padding(
+                                    padding: EdgeInsets.all(compact ? 24 : 14),
+                                    child: widget.child,
+                                  ),
+                          ),
+                        ],
                       ),
-                    ],
+                    ),
+                  ],
+                ),
+              ),
+              if (runtime.installingMessage != null) ...[
+                const Positioned.fill(
+                  child: ModalBarrier(
+                    dismissible: false,
+                    color: Color(0xF5FFFFFF),
+                  ),
+                ),
+                Positioned.fill(
+                  child: Center(
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 560),
+                      child: MaintenanceLoading(
+                        detail: runtime.installingMessage!,
+                        immediate: true,
+                      ),
+                    ),
                   ),
                 ),
               ],
-            ),
+            ],
           ),
         );
       },
@@ -429,41 +499,40 @@ class _AppShellState extends ConsumerState<AppShell>
   }
 
   Widget _sidebar() {
-    const items = [
-      ('종합 현황', '/', '시작과 준비'),
-      ('실사용 준비', '/setup', '시작과 준비'),
-      ('차량 현황', '/vehicles', '시작과 준비'),
-      ('AI 정비지원', '/support', '현장 작업'),
-      ('비전 점검', '/vision', '현장 작업'),
-      ('데이터 입력', '/entry', '현장 작업'),
-      ('정비 기록', '/records', '기록과 계획'),
-      ('연간 정비계획', '/plans', '기록과 계획'),
-      ('정비 분석', '/analysis', '기록과 계획'),
-      ('AI 분석 이력', '/ai-history', '기록과 계획'),
-      ('데이터 관리', '/data-tools', '관리'),
+    final items = [
+      ('종합 현황', '/', '바로 하기'),
+      ('사진 점검', '/vision', '바로 하기'),
+      ('기록 입력', '/entry', '바로 하기'),
+      ('정비 질문', '/chat', '바로 하기'),
+      ('차량 목록', '/vehicles', '차량과 기록'),
+      ('정비 기록', '/records', '차량과 기록'),
+      ('연간 정비계획', '/plans', '차량과 기록'),
+      ('정비 분석', '/analysis', '차량과 기록'),
+      ('지난 분석 결과', '/ai-history', '차량과 기록'),
+      ('부품별 정비', '/support', '도구와 설정'),
+      if (ref.watch(adaptiveRuntimeProvider).modelInfo['corpusDatabasePath']
+          is String)
+        ('책자 검색', '/manual-search', '도구와 설정'),
+      ('차량 등록·설정', '/setup', '도구와 설정'),
+      ('백업·자료 가져오기', '/data-tools', '도구와 설정'),
     ];
     return Container(
       color: ink,
       child: Column(
         children: [
-          const SizedBox(height: 24),
-          const DesignIcon('1:135', 'img', size: 72),
-          const SizedBox(height: 12),
+          const SizedBox(height: 16),
+          const DesignIcon('1:135', 'img', size: 48),
+          const SizedBox(height: 8),
           const Padding(
-            padding: EdgeInsets.symmetric(horizontal: 24),
-            child: Divider(color: Color(0xFF34393A)),
-          ),
-          const Text(
-            '대한민국 육군',
-            style: TextStyle(color: Color(0xFF8B95A1), fontSize: 10),
-          ),
-          const SizedBox(height: 6),
-          const Text(
-            '정비참모부 관리단',
-            style: TextStyle(
-              color: Colors.white,
-              fontSize: 15,
-              fontWeight: FontWeight.w700,
+            padding: EdgeInsets.symmetric(horizontal: 16),
+            child: Text(
+              '정비참모부 관리단',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 14,
+                fontWeight: FontWeight.w700,
+              ),
             ),
           ),
           const SizedBox(height: 8),
@@ -488,36 +557,11 @@ class _AppShellState extends ConsumerState<AppShell>
               ],
             ),
           ),
-          Container(
-            margin: const EdgeInsets.all(16),
-            padding: const EdgeInsets.all(13),
-            decoration: BoxDecoration(
-              color: const Color(0xFF25292A),
-              border: Border.all(color: const Color(0xFF34393A)),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: const Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  '데이터 저장',
-                  style: TextStyle(color: Color(0xFF8B95A1), fontSize: 10),
-                ),
-                SizedBox(height: 5),
-                Text(
-                  '기기 내 로컬 저장',
-                  style: TextStyle(
-                    color: green,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                Divider(color: Color(0xFF34393A)),
-                Text(
-                  '샘플 데이터 포함 · v0.3.0',
-                  style: TextStyle(color: Color(0xFF8B95A1), fontSize: 9),
-                ),
-              ],
+          Padding(
+            padding: const EdgeInsets.all(18),
+            child: Text(
+              '정비온 v${ref.watch(adaptiveRuntimeProvider).modelInfo['appVersion'] ?? '0.9.0'}',
+              style: const TextStyle(color: Color(0xFF8B95A1), fontSize: 10),
             ),
           ),
         ],
@@ -526,8 +570,10 @@ class _AppShellState extends ConsumerState<AppShell>
   }
 
   Widget _navigationItem(String label, String path) {
-    final location = widget.location == '/chat' ? '/support' : widget.location;
-    final selected = path == '/' ? location == '/' : location.startsWith(path);
+    final location = widget.location;
+    final selected = path == '/'
+        ? location == '/'
+        : location.startsWith(path) || (path == '/vision' && location == '/front-map');
     return Padding(
       padding: const EdgeInsets.only(bottom: 5),
       child: Material(
@@ -556,9 +602,9 @@ class _AppShellState extends ConsumerState<AppShell>
                   child: Text(
                     label,
                     style: TextStyle(
-                      color: selected ? Colors.white : const Color(0xFF8B95A1),
+                      color: selected ? Colors.white : const Color(0xFFB6C0C2),
                       fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-                      fontSize: 13,
+                      fontSize: 14,
                     ),
                   ),
                 ),

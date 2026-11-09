@@ -38,7 +38,15 @@ class _SetupState extends ConsumerState<SetupScreen> {
         : s.supportLibrary.rules.where((r) => r.vehicleId == v.id).length;
     return ListView(
       children: [
-        const PageTitle('실사용 준비', '차량 등록 → 근거 준비 → 정비 주기 확인 → 점검·정비 기록'),
+        const PageTitle('초기 설정', '차량 등록 → 근거 준비 → 정비 주기 확인 → 점검·정비 기록'),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: TextButton.icon(
+            onPressed: () => context.push('/welcome'),
+            icon: const Icon(Icons.help_outline),
+            label: const Text('정비온 사용 안내'),
+          ),
+        ),
         Panel(
           title: '준비 상태',
           child: Column(
@@ -81,7 +89,7 @@ class _SetupState extends ConsumerState<SetupScreen> {
         const SizedBox(height: 16),
         Panel(
           title: '1. 내 차량 등록',
-          subtitle: '예제 차량과 구분하여 이 기기에 저장합니다.',
+          subtitle: '분석용 차량과 구분하여 이 기기에 저장합니다.',
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
@@ -95,14 +103,16 @@ class _SetupState extends ConsumerState<SetupScreen> {
                       .map(
                         (v) => DropdownMenuItem(
                           value: v.id,
-                          child: Text('${v.id} · ${v.model}'),
+                          child: Text(
+                            '${vehicleLabel(v.id)} · ${modelLabel(v.model)}',
+                          ),
                         ),
                       )
                       .toList(),
                   onChanged: (value) => setState(() => selected = value),
                 ),
               if (s.registeredVehicles.isEmpty)
-                note('현재 예제 데이터로 시작한 상태입니다. 실제 사용할 차량을 먼저 등록해 주세요.'),
+                note('현재 분석용 데이터로 시작한 상태입니다. 실제 사용할 차량을 먼저 등록해 주세요.'),
               const SizedBox(height: 12),
               FilledButton(
                 onPressed: () async {
@@ -120,7 +130,9 @@ class _SetupState extends ConsumerState<SetupScreen> {
         const SizedBox(height: 16),
         Panel(
           title: '2. 정비 근거 준비',
-          subtitle: v == null ? '차량을 먼저 등록해 주세요.' : '${v.model} · 등록 근거 $docs건',
+          subtitle: v == null
+              ? '차량을 먼저 등록해 주세요.'
+              : '${modelLabel(v.model)} · 등록 근거 $docs건',
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
@@ -251,7 +263,7 @@ class _VehicleRegistrationState extends State<VehicleRegistrationDialog> {
                           if (!RegExp(r'^[A-Za-z0-9가-힣_-]{1,40}$')
                                   .hasMatch(value) ||
                               value.startsWith('MOCK-')) {
-                            return '차량번호 형식을 확인해 주세요. MOCK-는 예제 전용입니다.';
+                            return '차량번호 형식을 확인해 주세요. MOCK-는 분석용 차량 전용입니다.';
                           }
                           if (widget.store.vehicles.any((v) => v.id == value)) {
                             return '이미 등록된 차량번호입니다.';

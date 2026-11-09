@@ -1,3 +1,5 @@
+import 'maintenance_loading.dart';
+
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -49,6 +51,7 @@ class _EntryState extends ConsumerState<EntryScreen> {
   late bool maintenance;
   bool saving = false;
   String? success;
+  Maintenance? originalRecord;
   @override
   void initState() {
     super.initState();
@@ -60,7 +63,8 @@ class _EntryState extends ConsumerState<EntryScreen> {
       loadVehicle(s, r.vehicleId);
       part.text = r.part;
       cost.text = '${r.cost}';
-      description.text = r.description;
+      originalRecord = r;
+      description.text = maintenanceDescriptionLabel(r);
       system = r.system;
       maintenanceType = r.maintenanceType;
       date = DateTime.parse(r.date);
@@ -133,7 +137,12 @@ class _EntryState extends ConsumerState<EntryScreen> {
           date: date.toIso8601String().substring(0, 10),
           part: part.text.trim(),
           system: system,
-          description: description.text.trim(),
+          description:
+              originalRecord != null &&
+                  description.text.trim() ==
+                      maintenanceDescriptionLabel(originalRecord!)
+              ? originalRecord!.description
+              : description.text.trim(),
           cost: parseKm(cost.text)!,
           maintenanceType: maintenanceType,
           inspectionId: inspectionId,
@@ -263,6 +272,8 @@ class _EntryState extends ConsumerState<EntryScreen> {
     ]..sort((a, b) => b['date']!.compareTo(a['date']!));
     return ListView(
       children: [
+        if (saving)
+          const MaintenanceLoading(detail: '기록을 저장하고 분석 결과를 갱신하고 있어요.'),
         PageTitle(
           savedRecordId != null && success != null
               ? '정비 완료'
@@ -397,7 +408,9 @@ class _EntryState extends ConsumerState<EntryScreen> {
                             .map(
                               (v) => DropdownMenuItem(
                                 value: v.id,
-                                child: Text('${v.id} · ${v.model}'),
+                                child: Text(
+                                  '${vehicleLabel(v.id)} · ${modelLabel(v.model)}',
+                                ),
                               ),
                             )
                             .toList(),
@@ -481,7 +494,7 @@ class _EntryState extends ConsumerState<EntryScreen> {
                             ),
                             initialValue: conceptSelection ?? 'unconfirmed',
                             decoration: const InputDecoration(
-                              labelText: '부품 개념 선택',
+                              labelText: '부품 이름 선택',
                             ),
                             items: [
                               const DropdownMenuItem(
@@ -504,7 +517,7 @@ class _EntryState extends ConsumerState<EntryScreen> {
                           CheckboxListTile(
                             key: const ValueKey('confirm-part-concept'),
                             contentPadding: EdgeInsets.zero,
-                            title: const Text('선택한 부품 개념과 이 정비 기록의 연결을 확인했습니다'),
+                            title: const Text('선택한 부품 이름과 이 정비 기록의 연결을 확인했습니다'),
                             subtitle: const Text('장착 품번·적용조건의 확정을 뜻하지 않습니다.'),
                             value: confirmedConceptId != null,
                             onChanged: conceptSelection == null
@@ -576,7 +589,7 @@ class _EntryState extends ConsumerState<EntryScreen> {
                           const SizedBox(height: 12),
                         ],
                         const Text(
-                          '정비 계통 *',
+                          '정비 종류 *',
                           style: TextStyle(
                             fontWeight: FontWeight.w700,
                             fontSize: 12,
@@ -657,8 +670,8 @@ class _EntryState extends ConsumerState<EntryScreen> {
                               note(
                                 suggestion.system.label == null ||
                                         suggestion.type.label == null
-                                    ? '목업 분류 모델: 판단을 보류합니다. 정비 계통과 구분을 직접 선택해 주세요.'
-                                    : '목업 분류 제안: ${suggestion.system.label} · ${suggestion.type.label}. 실제 정비 결과는 직접 확인해 주세요.',
+                                    ? 'AI 분류: 정비 종류과 구분을 직접 선택해 주세요.'
+                                    : 'AI 분류 제안: ${suggestion.system.label} · ${suggestion.type.label}. 실제 정비 결과는 직접 확인해 주세요.',
                               ),
                               if (suggestion.system.label != null &&
                                   suggestion.type.label != null)

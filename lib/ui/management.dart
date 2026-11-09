@@ -3,7 +3,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../data/store.dart';
+import '../data/inspection_priority.dart';
 import 'components.dart';
+import 'front_inspection.dart';
 import 'support.dart';
 
 Map<String, num> _systemCounts(List<Maintenance> records) {
@@ -22,7 +24,7 @@ class VehiclesScreen extends ConsumerStatefulWidget {
 
 class _VehiclesState extends ConsumerState<VehiclesScreen> {
   final search = TextEditingController();
-  String status = '전체', sort = '확률 높은 순', year = '전체';
+  String status = '전체', sort = 'AI 점수 높은 순', year = '전체';
   int page = 0;
   bool showExamples = false;
   @override
@@ -34,15 +36,16 @@ class _VehiclesState extends ConsumerState<VehiclesScreen> {
   @override
   Widget build(BuildContext context) {
     final s = ref.watch(storeProvider);
-    final filtered = s.vehicles
+    final filtered = (showExamples ? s.vehicles : s.activeVehicles)
         .where(
           (v) =>
               (showExamples ||
+                  s.dashboardExampleView ||
                   s.registeredVehicles.isEmpty ||
                   !v.id.startsWith('MOCK-')) &&
-              ('${v.id} ${v.model}'.toLowerCase().contains(
-                search.text.toLowerCase(),
-              )) &&
+              ('${v.id} ${vehicleLabel(v.id)} ${modelLabel(v.model)}'
+                  .toLowerCase()
+                  .contains(search.text.toLowerCase())) &&
               (status == '전체' || statusLabel(v.status) == status) &&
               (year == '전체' || '${v.year}' == year),
         )
@@ -60,8 +63,8 @@ class _VehiclesState extends ConsumerState<VehiclesScreen> {
     return ListView(
       children: [
         PageTitle(
-          '차량 현황',
-          '차량 운용 실적과 정비 이력을 조회합니다.',
+          '차량 목록',
+          '차량을 선택하면 운용 현황과 정비 기록을 볼 수 있습니다.',
           scopeVehicles: filtered,
           action: OutlinedButton(
             onPressed: () => context.go('/setup'),
@@ -73,7 +76,7 @@ class _VehiclesState extends ConsumerState<VehiclesScreen> {
         if (s.registeredVehicles.isNotEmpty)
           CheckboxListTile(
             value: showExamples,
-            title: const Text('예제 차량 함께 보기'),
+            title: const Text('분석용 차량 함께 보기'),
             onChanged: (value) => setState(() {
               showExamples = value ?? false;
               page = 0;
@@ -118,7 +121,7 @@ class _VehiclesState extends ConsumerState<VehiclesScreen> {
                 }),
               ),
               _dropdown(sort, [
-                '확률 높은 순',
+                'AI 점수 높은 순',
                 '주행거리 높은 순',
                 '차량번호 순',
               ], (v) => setState(() => sort = v)),
@@ -127,7 +130,7 @@ class _VehiclesState extends ConsumerState<VehiclesScreen> {
                   search.clear();
                   status = '전체';
                   year = '전체';
-                  sort = '확률 높은 순';
+                  sort = 'AI 점수 높은 순';
                   page = 0;
                 }),
                 icon: const DesignIcon('1:445', 'imgRotateCcw'),
@@ -155,7 +158,7 @@ class _VehiclesState extends ConsumerState<VehiclesScreen> {
                     '유류 사용량',
                     '정비 횟수',
                     '최근 정비일',
-                    '예측 확률',
+                    'AI 분석 점수',
                     '상태',
                     '상세',
                   ],
@@ -247,7 +250,7 @@ Widget _dropdown(
         .map(
           (s) => DropdownMenuItem(
             value: s,
-            child: Text(s, style: const TextStyle(fontSize: 12)),
+            child: Text(vehicleLabel(s), style: const TextStyle(fontSize: 12)),
           ),
         )
         .toList(),
@@ -269,7 +272,7 @@ class VehicleDetailScreen extends ConsumerWidget {
       children: [
         PageTitle(
           '차량번호 $id',
-          '${v.model} · 운용·정비 상세 현황',
+          '${modelLabel(v.model)} · 운용·정비 상세 현황',
           scopeVehicles: [v],
           action: OutlinedButton(
             onPressed: () => context.go('/vehicles'),
@@ -283,7 +286,7 @@ class VehicleDetailScreen extends ConsumerWidget {
             StatusBadge(v.status),
             cell(
               v.predictionReady
-                  ? '로컬 목업 예측 ${v.risk}% · 실제 고장 판정 아님'
+                  ? 'AI 분석 점수 ${v.risk}%'
                   : '${s.predictionUnavailableReason(v.id)} · 분석 보류',
               color: muted,
             ),
@@ -331,8 +334,8 @@ class VehicleDetailScreen extends ConsumerWidget {
         ResponsiveColumns(
           children: [
             Panel(
-              title: '다음 달 고장수리 예측',
-              subtitle: '기기 내 추론 · 목업으로 학습한 모델',
+              title: 'AI 분석 점수',
+              subtitle: '운용·정비 기록을 기기 안에서 분석합니다.',
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -352,7 +355,7 @@ class VehicleDetailScreen extends ConsumerWidget {
                   ),
                   const SizedBox(height: 16),
                   note(
-                    '목업 학습 모델의 추정치입니다. 저장 시 다시 계산되며, 진행 중인 월은 임시 추정입니다. 실제 고장이나 안전 상태를 판정하지 않습니다.',
+                    '기록을 저장하면 다시 계산합니다. 진행 중인 월의 결과는 잠정 점수입니다.',
                     color: Colors.orange,
                   ),
                 ],
@@ -382,7 +385,7 @@ class VehicleDetailScreen extends ConsumerWidget {
         ),
         const SizedBox(height: 16),
         Panel(
-          title: '연결 액션',
+          title: '이 차량으로 할 일',
           child: Wrap(
             spacing: 12,
             runSpacing: 12,
@@ -395,17 +398,22 @@ class VehicleDetailScreen extends ConsumerWidget {
               OutlinedButton.icon(
                 onPressed: () => context.go('/ai-history?vehicle=$id'),
                 icon: const DesignIcon('1:781', 'imgActivity'),
-                label: const Text('AI 분석 이력'),
+                label: const Text('지난 분석 결과'),
+              ),
+              OutlinedButton.icon(
+                onPressed: () => context.push(frontMapUrl(id)),
+                icon: const Icon(Icons.directions_car_outlined),
+                label: const Text('차량 상태 지도'),
               ),
               OutlinedButton.icon(
                 onPressed: () => context.go('/vision?vehicle=$id'),
                 icon: const DesignIcon('1:781', 'imgScanLine'),
-                label: const Text('비전 점검'),
+                label: const Text('사진 점검'),
               ),
               OutlinedButton.icon(
                 onPressed: () => context.go(supportUrl(id)),
                 icon: const DesignIcon('1:781', 'imgMessageCircle'),
-                label: const Text('AI 정비지원'),
+                label: const Text('부품별 정비'),
               ),
               OutlinedButton(
                 onPressed: () => context.go('/plans?vehicle=$id'),
@@ -441,7 +449,7 @@ Widget _recordTable(BuildContext context, List<Maintenance> records) =>
                 SizedBox(
                   width: 230,
                   child: Text(
-                    r.description,
+                    maintenanceDescriptionLabel(r),
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(fontSize: 12),
@@ -491,7 +499,8 @@ class _RecordsState extends ConsumerState<RecordsScreen> {
                   ? s.activeVehicles.any((v) => v.id == r.vehicleId)
                   : r.vehicleId == vehicle) &&
               (system == '전체' || r.system == system) &&
-              '${r.vehicleId} ${r.part} ${r.description}'.contains(search.text),
+              '${r.vehicleId} ${vehicleLabel(r.vehicleId)} ${r.part} ${maintenanceDescriptionLabel(r)}'
+                  .contains(search.text),
         )
         .toList();
     if (!newest) rows.sort((a, b) => b.cost.compareTo(a.cost));
@@ -640,8 +649,8 @@ class RecordDetailScreen extends ConsumerWidget {
               for (final pair in [
                 ('차량번호', r.vehicleId),
                 ('정비일자', r.date),
-                ('차종', s.vehicle(r.vehicleId).model),
-                ('정비 계통', r.system),
+                ('차종', modelLabel(s.vehicle(r.vehicleId).model)),
+                ('정비 종류', r.system),
                 ('가격', '${number(r.cost)}원'),
                 if (r.odometerKm != null)
                   ('교환 당시 계기', '${number(r.odometerKm!)} km'),
@@ -686,9 +695,11 @@ class RecordDetailScreen extends ConsumerWidget {
                   const Divider(height: 36),
                   cell('정비 내용', color: muted),
                   const SizedBox(height: 10),
-                  Text(r.description, style: const TextStyle(height: 1.8)),
+                  Text(
+                    maintenanceDescriptionLabel(r),
+                    style: const TextStyle(height: 1.8),
+                  ),
                   const SizedBox(height: 32),
-                  note('인증 없이 사용하는 현장 모드입니다. 이 기록은 사용자 승인·신원 인증을 의미하지 않습니다.'),
                 ],
               ),
             ),
@@ -769,13 +780,13 @@ class RecordDetailScreen extends ConsumerWidget {
                   OutlinedButton(
                     onPressed: () =>
                         context.go('/ai-history?vehicle=${r.vehicleId}'),
-                    child: const Text('관련 AI 분석 이력'),
+                    child: const Text('관련 분석 결과'),
                   ),
                   const SizedBox(height: 12),
                   OutlinedButton(
                     onPressed: () =>
                         context.go('/vision?vehicle=${r.vehicleId}'),
-                    child: const Text('비전 점검 열기'),
+                    child: const Text('사진 점검 열기'),
                   ),
                 ],
               ),
@@ -908,7 +919,7 @@ class _AnalysisState extends ConsumerState<AnalysisScreen> {
         ResponsiveColumns(
           children: [
             Panel(
-              title: '계통별 정비 발생 현황',
+              title: '장치 종류별 정비 현황',
               child: rows.isEmpty
                   ? empty('해당 기간의 기록이 없습니다.')
                   : Bars(_systemCounts(rows)),
@@ -969,7 +980,7 @@ class _AiHistoryState extends ConsumerState<AiHistoryScreen> {
     final s = ref.watch(storeProvider);
     selected ??= s.vehicles.any((v) => v.id == widget.vehicleId)
         ? widget.vehicleId
-        : s.vehicles.first.id;
+        : s.activeVehicles.first.id;
     final v = s.vehicle(selected!);
     final sessions = s.inspections
         .where((i) => i.vehicleId == selected)
@@ -977,13 +988,9 @@ class _AiHistoryState extends ConsumerState<AiHistoryScreen> {
     return ListView(
       children: [
         PageTitle(
-          'AI 분석 이력',
-          '차량별 분석 결과와 비전 점검 기록을 확인합니다.',
+          '지난 분석 결과',
+          '차량별 분석 결과와 사진 점검 기록을 확인합니다.',
           scopeVehicles: [v],
-        ),
-        note(
-          '규칙 기반 잔여 정비거리 + 정비기록 분류를 사용합니다. 아래 고장 확률은 합성 예제이며 실제 차량의 예측값이 아닙니다.',
-          color: Colors.orange,
         ),
         const SizedBox(height: 16),
         Panel(
@@ -1000,27 +1007,46 @@ class _AiHistoryState extends ConsumerState<AiHistoryScreen> {
               ),
               StatusBadge(v.status),
               cell(
-                v.predictionReady ? '목업 예측 ${v.risk}%' : '예측 없음',
+                v.predictionReady ? 'AI 분석 점수 ${v.risk}%' : '예측 없음',
                 bold: true,
               ),
               FilledButton(
                 onPressed: () => context.go('/vision?vehicle=$selected'),
-                child: const Text('비전 점검 시작'),
+                child: const Text('사진 점검 시작'),
               ),
             ],
           ),
         ),
         const SizedBox(height: 16),
         Panel(
-          title: '로컬 예측 이력',
-          subtitle: '다음 달 고장수리 추정 · 진행 중인 월은 임시 결과',
+          title: '점검 순서와 이유',
+          subtitle: '주기 도래 → 반복 수리 → 이전 분석 참고 → 기준 확인 · 교환 지시가 아닌 점검 안내',
+          child: Column(
+            children: s
+                .inspectionPriorities(v.id)
+                .asMap()
+                .entries
+                .map(
+                  (entry) => ListTile(
+                    leading: CircleAvatar(child: Text('${entry.key + 1}')),
+                    title: Text(entry.value.part),
+                    subtitle: Text(entry.value.reason),
+                  ),
+                )
+                .toList(),
+          ),
+        ),
+        const SizedBox(height: 16),
+        Panel(
+          title: '이전 분석 결과',
+          subtitle: '이번 달은 기록이 추가되면 점수가 바뀝니다.',
           child:
               s.predictionHistory
                   .where((r) => r['vehicleId'] == selected)
                   .isEmpty
               ? empty('예측에 필요한 월별 운용 기록이 없습니다.')
               : DataGrid(
-                  columns: const ['계산일시', '갱신 사유', '추정 확률', '상태'],
+                  columns: const ['계산일시', '갱신 사유', '분석 점수', '상태'],
                   rows: s.predictionHistory
                       .where((r) => r['vehicleId'] == selected)
                       .take(20)
@@ -1031,13 +1057,11 @@ class _AiHistoryState extends ConsumerState<AiHistoryScreen> {
                                 .substring(0, 16)
                                 .replaceAll('T', ' '),
                           ),
-                          cell(r['trigger'] as String),
+                          cell(predictionTriggerLabel(r['trigger'] as String)),
                           cell(
                             '${((r['probability'] as num) * 100).toStringAsFixed(1)}%',
                           ),
-                          cell(
-                            r['provisional'] == true ? '부분월 임시 추정' : '월말 관측',
-                          ),
+                          cell(r['provisional'] == true ? '이번 달 분석' : '월간 분석'),
                         ],
                       )
                       .toList(),
@@ -1045,7 +1069,7 @@ class _AiHistoryState extends ConsumerState<AiHistoryScreen> {
         ),
         const SizedBox(height: 16),
         Panel(
-          title: '저장된 비전 점검 세션',
+          title: '저장된 사진 점검 기록',
           subtitle: '${sessions.length}건 · 수동 점검 기록',
           child: sessions.isEmpty
               ? empty('저장된 촬영 기록이 없습니다.')

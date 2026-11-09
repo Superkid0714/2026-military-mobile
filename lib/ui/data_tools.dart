@@ -1,3 +1,5 @@
+import 'maintenance_loading.dart';
+
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -249,19 +251,34 @@ class _DataToolsState extends ConsumerState<DataToolsScreen> {
           scopeVehicles: s.vehicles,
           scopeLabel: '백업 대상',
         ),
-        if (busy && !preview) const LinearProgressIndicator(),
+        if (s.presentationVehicles.isEmpty)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 16),
+            child: OutlinedButton.icon(
+              onPressed: busy
+                  ? null
+                  : () => run(() async {
+                      await s.loadPresentationFleet();
+                      return '운용 예시 12대의 기록과 점검 계획을 추가했습니다.';
+                    }),
+              icon: const Icon(Icons.add_chart),
+              label: const Text('운용 예시 채우기'),
+            ),
+          ),
+        if (busy && !preview)
+          const MaintenanceLoading(detail: '자료를 확인하고 기록을 정리하고 있어요.'),
         if (message != null)
           Padding(
             padding: const EdgeInsets.only(bottom: 16),
             child: note(message!),
           ),
         Panel(
-          title: '로컬 백업·복원',
+          title: '기록 파일 저장·불러오기',
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               const Text(
-                '차량·정비·운용·질문·분석·변경 이력과 점검 사진을 한 파일에 보관합니다. 암호화되지 않은 백업이므로 보관 위치를 직접 선택해 주세요. 기기 또는 USB의 로컬 파일을 사용합니다.',
+                '차량·정비·운용·질문·분석·변경 이력과 점검 사진을 한 파일에 보관합니다. 암호화되지 않은 백업이므로 보관 위치를 직접 선택해 주세요. 기기나 USB에 파일을 저장할 수 있습니다.',
               ),
               const SizedBox(height: 16),
               Wrap(
@@ -414,7 +431,7 @@ class _DataToolsState extends ConsumerState<DataToolsScreen> {
         TextButton.icon(
           key: const ValueKey('open-runtime-settings'),
           icon: const Icon(Icons.memory),
-          label: const Text('기기 사양·모델 단계 설정'),
+          label: const Text('분석 기능·자료 관리'),
           onPressed: () => showDialog<void>(
             context: context,
             builder: (c) => AlertDialog(

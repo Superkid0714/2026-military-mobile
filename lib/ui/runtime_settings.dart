@@ -4,6 +4,8 @@ import 'package:flutter/services.dart';
 
 import 'dart:io';
 
+import 'package:go_router/go_router.dart';
+
 import '../data/adaptive_runtime.dart';
 import '../data/model_execution.dart';
 import '../data/store.dart';
@@ -23,32 +25,27 @@ class RuntimeSettingsPanel extends ConsumerWidget {
     final r = ref.watch(adaptiveRuntimeProvider);
     final d = r.device;
     return Panel(
-      title: '기기 사양·모델 단계',
-      subtitle: '측정 근거가 있는 단계만 자동 선택 · 사용자는 하향 선택 가능',
+      title: '분석 기능·자료 관리',
+      subtitle: '책자와 사진 분석에 필요한 자료를 추가하거나 처리 설정을 바꿉니다.',
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           if (d != null)
             Text(
-              'RAM ${gib(d.totalRamBytes)} · 가용 ${gib(d.availableRamBytes)}\n'
-              'CPU ${d.cores}코어 · ${d.abis.join(', ')} · Android API ${d.androidApi}\n'
-              '앱 저장공간 여유 ${gib(d.freeStorageBytes)}${d.lowMemory ? ' · 시스템 저메모리 상태' : ''}',
+              '메모리 ${gib(d.totalRamBytes)} · 현재 여유 ${gib(d.availableRamBytes)}\n저장 공간 여유 ${gib(d.freeStorageBytes)}',
             ),
           if (r.detectionError != null) Text(r.detectionError!),
           Text(
-            '카메라: ${r.cameraOpenFailed ? '실제 연결 실패' : d?.cameraStatusLabel ?? '확인 불가'} · 사용 불가 시 수동 부품 선택',
+            '카메라: ${r.cameraOpenFailed ? '연결을 확인해 주세요' : d?.cameraStatusLabel ?? '확인 중'}',
           ),
           Text(
-            '현재: ${tierName(r.selectedTier)} · LLM ${r.generationEnabled ? '켜짐' : '꺼짐 (retrieval_only)'}',
+            '현재 처리 설정: ${tierName(r.selectedTier)} · 추가 문장 정리 ${r.generationEnabled ? '시험 가능' : '사용 안 함'}',
           ),
-          const Text(
-            '모델 단계 기준: 실측 전 미확정. 현재 기본 단계는 보수적 선택이며 최소 사양 검증 결과가 아닙니다.',
-          ),
-          const Text(maintenanceDecisionModuleName),
+          const Text('남은 정비거리는 등록한 주기와 마지막 교환 기록으로 계산합니다.'),
           Text(
             r.installedModels.isEmpty
-                ? '실제 Vision·임베딩·정비기록 분류·LLM 모델: 미등록. 기존 예제 모델은 별도입니다.'
-                : '설치 모델: ${r.installedModels.map((m) => m.id).join(' · ')} · 잔여 정비거리는 등록 규칙으로 계산',
+                ? '추가된 책자·사진 분석 자료가 없습니다.'
+                : '추가 기능 ${r.installedModels.length}개 준비됨',
           ),
           TextButton(
             onPressed: () async {
@@ -58,6 +55,18 @@ class RuntimeSettingsPanel extends ConsumerWidget {
                 path = await channel.invokeMethod<String>('pickEmbedding');
                 if (path == null) return;
                 await r.installEmbedding(path);
+                if (r.modelInfo['corpusDatabasePath'] is String) {
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text(
+                          '책자 ${r.modelInfo['corpusDocumentCount']}개 · ${r.modelInfo['corpusPageCount']}쪽 · 페이지 이미지 ${r.modelInfo['corpusImagePageCount'] ?? 0}쪽을 반입했습니다. 책자 검색 메뉴에서 질문해 주세요.',
+                        ),
+                      ),
+                    );
+                  }
+                  return;
+                }
                 final knowledgePath = r.modelInfo['knowledgePath'] as String;
                 final bundle = KnowledgeBundle.decode(
                   await File(knowledgePath).readAsString(),
@@ -66,7 +75,7 @@ class RuntimeSettingsPanel extends ConsumerWidget {
                 final yes = await showDialog<bool>(
                   context: context,
                   builder: (c) => AlertDialog(
-                    title: const Text('임베딩 모델 설치 완료 · 근거 반입 확인'),
+                    title: const Text('책자 찾기 기능 준비 완료 · 참고 내용 추가'),
                     content: Text(
                       '문서 근거 ${bundle.library.evidence.length}개 · 검토 대기 실적 ${bundle.library.knowledge.pending.length}건\n품번과 차량 적용조건은 별도로 확인합니다. 근거도 반입하시겠습니까?',
                     ),
@@ -90,8 +99,8 @@ class RuntimeSettingsPanel extends ConsumerWidget {
                     SnackBar(
                       content: Text(
                         yes == true
-                            ? '임베딩 모델과 근거를 반입했습니다. 차량 적용조건을 확인해 주세요.'
-                            : '모델은 설치됐습니다. 기존 근거에 맞는 색인이 없으면 키워드 검색을 유지합니다.',
+                            ? '책자 찾기 자료를 추가했습니다. 이 차량에 맞는 내용인지 확인해 주세요.'
+                            : '찾기 기능을 준비했습니다. 연결된 자료가 없으면 입력한 말로 찾습니다.',
                       ),
                     ),
                   );
@@ -112,8 +121,14 @@ class RuntimeSettingsPanel extends ConsumerWidget {
                 }
               }
             },
-            child: const Text('로컬 임베딩 묶음 반입 (.mrag)'),
+            child: const Text('책자 찾기 자료 추가하기 (.mrag)'),
           ),
+          if (r.modelInfo['corpusDatabasePath'] is String)
+            TextButton.icon(
+              onPressed: () => context.go('/manual-search'),
+              icon: const Icon(Icons.menu_book),
+              label: Text('책자 검색 열기 · ${r.modelInfo['corpusPageCount']}쪽'),
+            ),
           TextButton(
             onPressed: () async {
               const channel = MethodChannel('maintenance/local_files');
@@ -126,7 +141,7 @@ class RuntimeSettingsPanel extends ConsumerWidget {
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(
                       content: Text(
-                        '공개 Vision 모델을 반입했습니다. 렉스턴 부품 성능 검증용이 아닙니다.',
+                        '사진 속 물체 찾기 기능을 추가했습니다. 차량 부품의 고장을 판단하는 기능은 아닙니다.',
                       ),
                     ),
                   );
@@ -135,7 +150,9 @@ class RuntimeSettingsPanel extends ConsumerWidget {
                 if (context.mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(
-                      content: Text('Vision 모델 반입 실패: 파일·해시·공간을 확인해 주세요.'),
+                      content: Text(
+                        '사진 분석 기능을 추가하지 못했습니다. 파일과 저장 공간을 확인해 주세요.',
+                      ),
                     ),
                   );
                 }
@@ -147,7 +164,7 @@ class RuntimeSettingsPanel extends ConsumerWidget {
                 }
               }
             },
-            child: const Text('공개 Vision 모델 반입 (SSD MobileNet INT8)'),
+            child: const Text('사진 속 물체 찾기 기능 추가하기'),
           ),
           if ((d?.androidApi ?? 0) >= 28)
             TextButton(
@@ -162,7 +179,7 @@ class RuntimeSettingsPanel extends ConsumerWidget {
                     ScaffoldMessenger.of(context).showSnackBar(
                       const SnackBar(
                         content: Text(
-                          '선택 LLM을 반입했습니다. 자동 단계는 변경하지 않습니다. 정비지원 화면에서 요약 시험을 선택할 수 있습니다.',
+                          '문장 정리 기능을 추가했습니다. 정비지원에서 원문 요약을 확인할 수 있습니다.',
                         ),
                       ),
                     );
@@ -172,7 +189,7 @@ class RuntimeSettingsPanel extends ConsumerWidget {
                     ScaffoldMessenger.of(context).showSnackBar(
                       const SnackBar(
                         content: Text(
-                          'LLM 반입 실패: API·64비트 ABI·파일·공간을 확인해 주세요. 원문 검색을 유지합니다.',
+                          '문장 정리 기능을 추가하지 못했습니다. 기기 지원 여부와 파일·저장 공간을 확인해 주세요. 책자 검색은 계속 사용할 수 있습니다.',
                         ),
                       ),
                     );
@@ -185,7 +202,7 @@ class RuntimeSettingsPanel extends ConsumerWidget {
                   }
                 }
               },
-              child: const Text('선택 LLM 반입 (Qwen3-0.6B Q4_0 .gguf)'),
+              child: const Text('원문 문장 정리 기능 추가하기 (.gguf)'),
             ),
           TextButton(
             onPressed: () async {
@@ -199,7 +216,7 @@ class RuntimeSettingsPanel extends ConsumerWidget {
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(
                       content: Text(
-                        '단일 초안·출처 미확인 계통 분류 파일럿을 반입했습니다. 결과는 제안으로만 표시합니다.',
+                        '정비 종류를 제안하는 기능을 추가했습니다. 제안을 확인한 뒤 선택해 주세요.',
                       ),
                     ),
                   );
@@ -208,7 +225,9 @@ class RuntimeSettingsPanel extends ConsumerWidget {
                 if (context.mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(
-                      content: Text('파일럿 모델 반입 실패: 형식·출처 표시·파일 해시를 확인해 주세요.'),
+                      content: Text(
+                        '정비 분류 기능을 추가하지 못했습니다. 파일과 저장 공간을 확인해 주세요.',
+                      ),
                     ),
                   );
                 }
@@ -220,12 +239,12 @@ class RuntimeSettingsPanel extends ConsumerWidget {
                 }
               }
             },
-            child: const Text('계통 분류 파일럿 반입 (.msystem)'),
+            child: const Text('정비 내용을 종류별로 나누는 기능 추가하기 (.msystem)'),
           ),
           DropdownButtonFormField<String>(
             key: ValueKey('runtime-ceiling-${r.userCeiling?.name}'),
             initialValue: r.userCeiling?.name ?? 'auto',
-            decoration: const InputDecoration(labelText: '모델 단계 상한'),
+            decoration: const InputDecoration(labelText: '기기 처리 강도'),
             items: [
               const DropdownMenuItem(value: 'auto', child: Text('자동')),
               for (final t in ModelTier.values.where(
@@ -240,7 +259,7 @@ class RuntimeSettingsPanel extends ConsumerWidget {
           if (r.settingsError != null) Text(r.settingsError!),
           TextButton(
             onPressed: r.refreshDevice,
-            child: const Text('가용 사양 다시 확인'),
+            child: const Text('기기 상태 다시 확인'),
           ),
         ],
       ),
