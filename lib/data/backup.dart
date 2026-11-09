@@ -147,6 +147,7 @@ class BackupSnapshot {
               throw error;
             }
           case 'inspections':
+            FrontObservation.decode(row['front']);
             if ((row['conceptId'] != null && !validId(row['conceptId'])) ||
                 (row['conceptConfirmedAt'] != null &&
                     (!date(row['conceptConfirmedAt']) ||
@@ -399,7 +400,10 @@ extension BackupStorage on AppStore {
         for (final table in _backupTables.reversed) {
           await db!.customStatement('DELETE FROM $table');
         }
-        await db!.customStatement('DELETE FROM app_metadata');
+        // Onboarding belongs to this device and is not part of a portable backup.
+        await db!.customStatement(
+          "DELETE FROM app_metadata WHERE key IN ('mock_dataset','maintenance_support')",
+        );
         for (final table in _backupTables) {
           for (final row in checked.tables[table]!) {
             await _put(

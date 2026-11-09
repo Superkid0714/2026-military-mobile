@@ -419,20 +419,48 @@ extension MaintenanceSupport on AppStore {
     String query, {
     DateTime? asOf,
   }) {
-    final terms = maintenanceSearchTerms(query);
-    int score(MaintenanceEvidence e) {
-      final text = '${e.symptoms} ${e.text} ${e.part}'.toLowerCase();
-      return terms.where(text.contains).length +
+    final terms = maintenanceSearchTerms(query).map(_compact).toSet();
+    final eligible = eligibleEvidence(vehicleId, part, asOf: asOf);
+    final texts = {
+      for (final e in eligible)
+        e.id: _compact('${e.title} ${e.symptoms} ${e.text} ${e.part}'),
+    };
+    final averageLength = texts.isEmpty
+        ? 1.0
+        : texts.values.fold<int>(0, (sum, t) => sum + t.length) / texts.length;
+    final weights = {
+      for (final term in terms)
+        term: math.log(
+          1 +
+              (eligible.length -
+                      texts.values.where((t) => t.contains(term)).length +
+                      .5) /
+                  (texts.values.where((t) => t.contains(term)).length + .5),
+        ),
+    };
+    double score(MaintenanceEvidence e) {
+      final text = texts[e.id]!;
+      var value = 0.0;
+      for (final term in terms) {
+        final count = RegExp(RegExp.escape(term)).allMatches(text).length;
+        if (count == 0) continue;
+        // BM25: common words must not hide a short, specific source page.
+        value +=
+            weights[term]! *
+            count *
+            2.2 /
+            (count + 1.2 * (.25 + .75 * text.length / averageLength));
+      }
+      return value +
           partsIn(query).where((p) => matchesPart(e.part, p)).length * 3;
     }
 
-    final result = eligibleEvidence(
-      vehicleId,
-      part,
-      asOf: asOf,
-    ).where((e) => query.trim().isEmpty || score(e) > 0).toList();
+    final scores = {for (final e in eligible) e.id: score(e)};
+    final result = eligible
+        .where((e) => query.trim().isEmpty || scores[e.id]! > 0)
+        .toList();
     result.sort((a, b) {
-      final c = score(b).compareTo(score(a));
+      final c = scores[b.id]!.compareTo(scores[a.id]!);
       return c == 0 ? a.id.compareTo(b.id) : c;
     });
     return result.take(5).toList();

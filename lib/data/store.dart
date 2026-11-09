@@ -11,10 +11,12 @@ import 'package:path_provider/path_provider.dart';
 
 import 'local_models.dart';
 import 'calendar.dart';
+import 'front_inspection.dart';
 part 'backup.dart';
 part 'maintenance_support.dart';
 part 'knowledge_import.dart';
 part 'service_policy.dart';
+part 'presentation_fleet.dart';
 
 enum VehicleStatus { normal, caution, danger, unavailable }
 
@@ -143,10 +145,12 @@ class Inspection {
     this.conceptId,
     this.conceptConfirmedAt,
     this.vision,
+    this.front = const {},
   });
   final String id, vehicleId, area, mode, created, imagePath, note;
   final String? conceptId, conceptConfirmedAt;
   final Map<String, dynamic>? vision;
+  final Map<FrontPart, FrontObservation> front;
   String? get confirmedConceptId =>
       conceptConfirmedAt == null ? null : conceptId;
   Map<String, dynamic> toJson() => {
@@ -160,6 +164,8 @@ class Inspection {
     if (conceptId != null) 'conceptId': conceptId,
     if (conceptConfirmedAt != null) 'conceptConfirmedAt': conceptConfirmedAt,
     if (vision != null) 'vision': vision,
+    if (front.isNotEmpty)
+      'front': {for (final entry in front.entries) entry.key.name: entry.value.toJson()},
   };
   factory Inspection.fromJson(Map<String, dynamic> j) => Inspection(
     id: j['id'],
@@ -169,6 +175,7 @@ class Inspection {
     created: j['created'],
     imagePath: j['imagePath'],
     note: j['note'],
+    front: FrontObservation.decode(j['front']),
     conceptId: j['conceptId'] as String?,
     conceptConfirmedAt: j['conceptConfirmedAt'] as String?,
     vision: j['vision'] == null
@@ -263,6 +270,18 @@ class AppStore extends ChangeNotifier {
 
   LocalDatabase? db;
   bool ready = false;
+  bool dashboardExampleView = false;
+  bool onboardingCompleted = false;
+
+  Future<void> completeOnboarding() async {
+    await db!.customStatement(
+      'INSERT OR REPLACE INTO app_metadata (key,value) VALUES (?,?)',
+      ['onboarding_v1', 'done'],
+    );
+    onboardingCompleted = true;
+    notifyListeners();
+  }
+
   String? error;
   Object? initializationCause;
   List<Vehicle> vehicles = [];
@@ -273,7 +292,11 @@ class AppStore extends ChangeNotifier {
   List<Vehicle> get registeredVehicles =>
       vehicles.where((v) => !v.id.startsWith('MOCK-')).toList();
   List<Vehicle> get activeVehicles =>
-      registeredVehicles.isEmpty ? vehicles : registeredVehicles;
+      dashboardExampleView && presentationVehicles.isNotEmpty
+      ? presentationVehicles
+      : registeredVehicles.isEmpty
+      ? vehicles
+      : registeredVehicles;
 
   Future<void> registerVehicle(Vehicle value) => _mutate(() async {
     if (!RegExp(r'^[A-Za-z0-9가-힣_-]{1,40}$').hasMatch(value.id) ||
@@ -309,9 +332,9 @@ class AppStore extends ChangeNotifier {
   String predictionUnavailableReason(String vehicleId) {
     final v = vehicle(vehicleId);
     if (!v.id.startsWith('MOCK-')) {
-      return '등록 차량에는 합성 목업 예측을 적용하지 않습니다. 정비 주기를 확인해 주세요.';
+      return '등록 차량은 정비 기준과 이력을 중심으로 점검 순서를 안내합니다.';
     }
-    if (!v.model.startsWith('렉스턴')) return '현재 목업 모델의 지원 차종이 아닙니다.';
+    if (!v.model.startsWith('렉스턴')) return '현재 분석 모델의 지원 차종이 아닙니다.';
     return assessPrediction(
           vehicle: v.toJson(),
           operations: operations,
@@ -358,7 +381,10 @@ class AppStore extends ChangeNotifier {
     });
   }
 
-  Future<void> initialize({LocalDatabase? database}) async {
+  Future<void> initialize({
+    LocalDatabase? database,
+    bool populatePresentation = false,
+  }) async {
     try {
       models ??= await LocalModels.load();
       if (database != null) {
@@ -371,8 +397,8 @@ class AppStore extends ChangeNotifier {
           ),
         );
       }
-      await _read();
       await _seed();
+      if (populatePresentation) await _seedPresentationFleet();
       await _read();
       ready = true;
       error = null;
@@ -407,6 +433,18 @@ class AppStore extends ChangeNotifier {
   }
 
   Future<void> _readState() async {
+    final intro = await db!
+        .customSelect(
+          "SELECT value FROM app_metadata WHERE key='onboarding_v1'",
+        )
+        .getSingleOrNull();
+    onboardingCompleted = intro?.read<String>('value') == 'done';
+    final scope = await db!
+        .customSelect(
+          "SELECT value FROM app_metadata WHERE key='dashboard_scope'",
+        )
+        .getSingleOrNull();
+    dashboardExampleView = scope?.read<String>('value') == 'examples';
     final dirty = Map<String, String>.from(_dirtyVehicles);
     _dirtyVehicles.clear();
     vehicles = (await _rows('vehicles')).map(Vehicle.fromJson).toList()
@@ -418,18 +456,22 @@ class AppStore extends ChangeNotifier {
     inspections = (await _rows('inspections'))
         .map(Inspection.fromJson)
         .toList();
-    final supportRow = await db!
-        .customSelect(
-          "SELECT value FROM app_metadata WHERE key = 'maintenance_support'",
-        )
-        .getSingleOrNull();
-    supportLibrary = supportRow == null
-        ? const SupportLibrary()
-        : SupportLibrary.decode(supportRow.read<String>('value'));
+    supportLibrary = await _readSupportLibrary();
     temporalChanges = supportLibrary.knowledge.templates.isEmpty
         ? []
         : await _rows('record_changes');
     await _refreshPredictions(dirty);
+  }
+
+  Future<SupportLibrary> _readSupportLibrary() async {
+    final row = await db!
+        .customSelect(
+          "SELECT value FROM app_metadata WHERE key = 'maintenance_support'",
+        )
+        .getSingleOrNull();
+    return row == null
+        ? const SupportLibrary()
+        : SupportLibrary.decode(row.read<String>('value'));
   }
 
   Future<void> _refreshPredictions(Map<String, String> dirty) async {
@@ -438,13 +480,12 @@ class AppStore extends ChangeNotifier {
           'SELECT payload FROM predictions WHERE rowid IN (SELECT MAX(rowid) FROM predictions GROUP BY vehicle_id)',
         )
         .get();
-    final latest = {
-      for (final row in latestRows)
-        (jsonDecode(row.read<String>('payload'))
-                    as Map<String, dynamic>)['vehicleId']
-                as String:
-            jsonDecode(row.read<String>('payload')) as Map<String, dynamic>,
-    };
+    final latest = <String, Map<String, dynamic>>{};
+    for (final row in latestRows) {
+      final prediction =
+          jsonDecode(row.read<String>('payload')) as Map<String, dynamic>;
+      latest[prediction['vehicleId'] as String] = prediction;
+    }
     predictions = {
       for (final entry in latest.entries)
         if (entry.value['probability'] is num) entry.key: entry.value,
@@ -759,6 +800,7 @@ class AppStore extends ChangeNotifier {
         final data = value.toJson()
           ..remove('conceptId')
           ..remove('conceptConfirmedAt');
+        FrontObservation.decode(data['front']);
         if (confirmedConceptId != null) {
           if (before == null ||
               before.imagePath != value.imagePath ||
@@ -786,6 +828,7 @@ class AppStore extends ChangeNotifier {
           }
           if (before.imagePath != value.imagePath) {
             data.remove('vision');
+            data.remove('front');
           } else if (value.vision == null && before.vision != null) {
             data['vision'] = before.vision;
           }
