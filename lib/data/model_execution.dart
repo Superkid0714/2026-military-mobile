@@ -4,7 +4,7 @@ enum ModelTier { basic, enhanced, generation }
 
 const maintenanceDecisionModuleName = '규칙 기반 잔여 정비거리 + 정비기록 분류';
 
-enum ModelTask { vision, embedding, recordClassification, generation }
+enum ModelTask { vision, embedding, recordClassification, generation, frontParts }
 
 class DeviceCapabilities {
   const DeviceCapabilities({

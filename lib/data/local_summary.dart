@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:math' as math;
 
 import 'adaptive_runtime.dart';
 import 'model_execution.dart';
@@ -33,7 +34,77 @@ class LocalSummary {
   // Derived display/input only; registered evidence, offsets and hashes stay intact.
   static String canonical(String text) =>
       text.replaceAll(r'\r\n', ' ').replaceAll(RegExp(r'\s+'), ' ').trim();
-  static List<SummaryExcerpt> candidates(Map<String, String> context) {
+  static String _words(String text) =>
+      text.toLowerCase().replaceAll(RegExp(r'[\s_-]+'), '');
+
+  static Map<String, double> _relevance(
+    String question,
+    List<SummaryExcerpt> rows,
+  ) {
+    final terms = maintenanceSearchTerms(question)
+        // The search expansion keeps both a word and its particle-stripped form.
+        // Count the concept once so an inflected generic sentence cannot tie a
+        // specific warning by matching the same word twice.
+        .map(
+          (t) => t.replaceFirst(RegExp(r'(에서|으로|에는|이|가|을|를|은|는|도|에|의)$'), ''),
+        )
+        .map((t) => t.replaceFirst(RegExp(r'(되나요|인가요|하나요|나요|하는|한다|할)$'), ''))
+        .map(_words)
+        .where((t) => t.isNotEmpty)
+        .toSet();
+    final texts = rows.map((r) => _words(r.quote)).toList();
+    final action = question.contains('어떻게')
+        ? _words(
+            question
+                .trim()
+                .split(RegExp(r'\s+'))
+                .last
+                .replaceAll(RegExp(r'[?？.!]'), '')
+                .replaceFirst(RegExp(r'(되나요|인가요|하나요|나요)$'), ''),
+          )
+        : '';
+    final weights = {
+      for (final t in terms)
+        t: math.log(
+          1 + rows.length / (1 + texts.where((s) => s.contains(t)).length),
+        ),
+    };
+    return {
+      for (final r in rows)
+        '${r.citation}\n${r.quote}': terms
+            .where((t) => _words(r.quote).contains(t))
+            .fold<double>(0, (v, t) => v + weights[t]! * (t == action ? 3 : 1)),
+    };
+  }
+
+  static List<MaintenanceEvidence> selectEvidence(
+    String question,
+    List<MaintenanceEvidence> evidence,
+  ) {
+    final context = {for (final e in evidence.take(5)) e.id: canonical(e.text)};
+    final rows = candidates(context, question: question);
+    final scores = _relevance(question, rows);
+    double score(MaintenanceEvidence e) => rows
+        .where((r) => r.citation == e.id)
+        .fold<double>(
+          0,
+          (v, r) => math.max(v, scores['${r.citation}\n${r.quote}']!),
+        );
+    final ordered = evidence.take(5).toList();
+    final original = {
+      for (var i = 0; i < ordered.length; i++) ordered[i].id: i,
+    };
+    ordered.sort((a, b) {
+      final c = score(b).compareTo(score(a));
+      return c != 0 ? c : original[a.id]!.compareTo(original[b.id]!);
+    });
+    return ordered.take(2).toList();
+  }
+
+  static List<SummaryExcerpt> candidates(
+    Map<String, String> context, {
+    String question = '',
+  }) {
     final result = <SummaryExcerpt>[];
     for (final item in context.entries) {
       final text = canonical(String.fromCharCodes(item.value.runes.take(1800)));
@@ -46,10 +117,32 @@ class LocalSummary {
           continue;
         }
         result.add(SummaryExcerpt(item.key, quote));
-        if (++count == 2) break;
+        if (++count == 2 && question.isEmpty) break;
       }
     }
-    return result;
+    if (question.isEmpty || result.isEmpty) return result;
+    final scores = _relevance(question, result);
+    final best = scores.values.fold<double>(0, math.max);
+    if (best == 0) return const [];
+    final order = {
+      for (var i = 0; i < result.length; i++)
+        '${result[i].citation}\n${result[i].quote}': i,
+    };
+    result.sort((a, b) {
+      final ak = '${a.citation}\n${a.quote}', bk = '${b.citation}\n${b.quote}';
+      final c = scores[bk]!.compareTo(scores[ak]!);
+      return c != 0 ? c : order[ak]!.compareTo(order[bk]!);
+    });
+    final kept = <String, int>{};
+    return result.where((r) {
+      // Weaker source sentences can answer a different question; keep best ties.
+      if (scores['${r.citation}\n${r.quote}']! < best - 1e-9 ||
+          (kept[r.citation] ?? 0) >= 2) {
+        return false;
+      }
+      kept[r.citation] = (kept[r.citation] ?? 0) + 1;
+      return true;
+    }).toList();
   }
 
   static final cycleQuestion = RegExp(
@@ -76,8 +169,8 @@ class LocalSummary {
         question.runes.length > 120) {
       throw const FormatException('two_sources_and_64_to_128_tokens_required');
     }
-    final context = sources(evidence);
-    final allowed = candidates(context);
+    final context = sources(selectEvidence(question, evidence));
+    final allowed = candidates(context, question: question);
     if (allowed.isEmpty) throw const FormatException('no_safe_sentences');
     final q = question;
     // Context is JSON-escaped untrusted data. Extraction gate remains mandatory.
@@ -107,6 +200,7 @@ class LocalSummary {
     String raw,
     Map<String, String> context, {
     ModelRunResult? run,
+    String question = '',
   }) {
     GroundedSummary reject(String reason) =>
         GroundedSummary('retrieval_only', reason: reason, run: run);
@@ -164,8 +258,10 @@ class LocalSummary {
           start = source.indexOf(quote, start + 1);
         }
         if (!complete) return reject('partial_sentence');
-        if (!candidates(context)
-            .any((c) => c.citation == id && c.quote == quote)) {
+        if (!candidates(
+          context,
+          question: question,
+        ).any((c) => c.citation == id && c.quote == quote)) {
           return reject('not_an_allowed_sentence');
         }
         if (result.any((r) => r.citation == id && r.quote == quote)) {
@@ -177,6 +273,35 @@ class LocalSummary {
     } catch (_) {
       return reject('invalid_json');
     }
+  }
+
+  static GroundedSummary directExtract(
+    String question,
+    List<MaintenanceEvidence> evidence,
+  ) {
+    if (cycleQuestion.hasMatch(question.toLowerCase())) {
+      return const GroundedSummary(
+        'retrieval_only',
+        reason: 'cycle_values_use_registered_rules',
+      );
+    }
+    final safe = evidence
+        .where((e) => e.sourceRef?['textMethod'] != 'ocr')
+        .toList();
+    if (safe.isEmpty) {
+      return const GroundedSummary(
+        'retrieval_only',
+        reason: 'insufficient_context',
+      );
+    }
+    final rows = candidates(
+      sources(selectEvidence(question, safe)),
+      question: question,
+    ).take(2).toList();
+    return GroundedSummary(
+      rows.isEmpty ? 'retrieval_only' : 'extractive_summary',
+      excerpts: rows,
+    );
   }
 
   static Future<GroundedSummary> summarize(
@@ -203,14 +328,15 @@ class LocalSummary {
         reason: 'insufficient_context',
       );
     }
-    if (candidates(sources(evidence)).isEmpty) {
+    final selected = selectEvidence(question, evidence);
+    if (candidates(sources(selected), question: question).isEmpty) {
       return const GroundedSummary(
         'retrieval_only',
         reason: 'no_safe_sentences',
       );
     }
     final result = await runtime.runOptionalGeneration(
-      request(question, evidence, maxTokens: maxTokens),
+      request(question, selected, maxTokens: maxTokens),
     );
     if (result.mode != 'model') {
       return GroundedSummary(
@@ -228,8 +354,9 @@ class LocalSummary {
     }
     return validate(
       result.output!['text'] as String,
-      sources(evidence),
+      sources(selected),
       run: result,
+      question: question,
     );
   }
 }

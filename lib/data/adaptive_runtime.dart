@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/legacy.dart';
 
+import 'front_inspection.dart';
 import 'model_execution.dart';
 
 class AndroidModelWorker implements ModelWorker {
@@ -128,6 +129,17 @@ class AdaptiveRuntime extends ChangeNotifier {
       }
       for (final item in optional.cast<Map>()) {
         if (item['installed'] == true &&
+            item['modelId'] == FrontPartProposal.modelId) {
+          installedModels.add(
+            const ModelSpec(
+              FrontPartProposal.modelId,
+              ModelTask.frontParts,
+              ModelTier.basic,
+              minAndroidApi: 24,
+            ),
+          );
+        }
+        if (item['installed'] == true &&
             item['modelId'] == 'ssd-mobilenet-int8-public-v1') {
           installedModels.add(
             const ModelSpec(
@@ -158,38 +170,31 @@ class AdaptiveRuntime extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> installEmbedding(String path) async {
-    await manager.release();
-    await AndroidModelWorker.channel.invokeMethod<Object?>('installEmbedding', {
-      'path': path,
-    });
-    await refreshModels();
+  String? installingMessage;
+  Future<void> _install(String method, String path, String detail) async {
+    if (installingMessage != null) throw StateError('installation_in_progress');
+    installingMessage = detail;
+    notifyListeners();
+    try {
+      await manager.release();
+      await AndroidModelWorker.channel.invokeMethod<Object?>(method, {
+        'path': path,
+      });
+      await refreshModels();
+    } finally {
+      installingMessage = null;
+      notifyListeners();
+    }
   }
 
-  Future<void> installLlm(String path) async {
-    await manager.release();
-    await AndroidModelWorker.channel.invokeMethod<Object?>('installLlm', {
-      'path': path,
-    });
-    await refreshModels();
-  }
-
-  Future<void> installVision(String path) async {
-    await manager.release();
-    await AndroidModelWorker.channel.invokeMethod<Object?>('installVision', {
-      'path': path,
-    });
-    await refreshModels();
-  }
-
-  Future<void> installSystemPilot(String path) async {
-    await manager.release();
-    await AndroidModelWorker.channel.invokeMethod<Object?>(
-      'installSystemPilot',
-      {'path': path},
-    );
-    await refreshModels();
-  }
+  Future<void> installEmbedding(String path) =>
+      _install('installEmbedding', path, '책자와 검색 자료를 안전하게 넣고 있어요.');
+  Future<void> installLlm(String path) =>
+      _install('installLlm', path, '답변 모델을 준비하고 있어요.');
+  Future<void> installVision(String path) =>
+      _install('installVision', path, '사진 분석 모델을 준비하고 있어요.');
+  Future<void> installSystemPilot(String path) =>
+      _install('installSystemPilot', path, '정비 분류 모델을 준비하고 있어요.');
 
   /// Explicit one-request experiment, never an automatic RAM-based promotion.
   Future<ModelRunResult> runOptionalGeneration(
