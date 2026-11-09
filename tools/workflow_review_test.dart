@@ -28,7 +28,7 @@ void main() {
     final s = await setup(tester);
     expect(s.supportLibrary.evidence, isEmpty);
     expect(s.supportLibrary.rules, isEmpty);
-    await tap(tester, find.widgetWithText(FilledButton, 'AI 정비지원'));
+    await tap(tester, find.widgetWithText(OutlinedButton, '부품별 정비'));
     final vehicleField = tester.widget<DropdownButtonFormField<String>>(
       find.byType(DropdownButtonFormField<String>).first,
     );
@@ -113,7 +113,7 @@ void main() {
     await tester.enterText(find.byType(TextField), v.id);
     await tester.pumpAndSettle();
     await tap(tester, find.widgetWithText(TextButton, v.id));
-    await tap(tester, find.widgetWithText(OutlinedButton, 'AI 정비지원'));
+    await tap(tester, find.widgetWithText(OutlinedButton, '부품별 정비'));
     // Inspect a saved session from the support screen as a user would.
     final session = find.widgetWithText(ListTile, '엔진오일 · 2026-10-09');
     await tap(tester, session);

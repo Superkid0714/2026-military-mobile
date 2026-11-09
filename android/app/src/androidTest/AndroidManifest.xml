@@ -4,6 +4,8 @@
         android:targetPackage="com.superkid.military.military_maintenance" />
     <instrumentation android:name="com.superkid.military.military_maintenance.MemoryPolicyInstrumentation"
         android:targetPackage="com.superkid.military.military_maintenance" />
+    <instrumentation android:name="com.superkid.military.military_maintenance.ManualUiInstrumentation"
+        android:targetPackage="com.superkid.military.military_maintenance" />
     <instrumentation android:name="com.superkid.military.military_maintenance.AuxUiInstrumentation"
         android:targetPackage="com.superkid.military.military_maintenance.test" />
     <instrumentation android:name="com.superkid.military.military_maintenance.AuxStoreInstrumentation"

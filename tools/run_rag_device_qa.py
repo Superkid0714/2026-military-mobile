@@ -10,7 +10,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--adb', required=True)
     parser.add_argument('--serial', required=True)
-    parser.add_argument('--entry', choices=['ragDeviceProbe', 'mlDeviceProbe', 'optionalModelDeviceProbe'], default='ragDeviceProbe')
+    parser.add_argument('--entry', choices=['ragDeviceProbe', 'mlDeviceProbe', 'offlineChatDeviceProbe', 'optionalModelDeviceProbe', 'pdfReferenceDeviceProbe', 'manualRagDeviceProbe'], default='ragDeviceProbe')
     parser.add_argument('--output', default='output/rag-device-qa')
     args = parser.parse_args()
     out = Path(args.output)
@@ -37,7 +37,7 @@ def main():
         log = adb('shell', 'am', 'instrument', '-w', '-e', 'entry', args.entry,
                   '-e', 'qaRunId', run_id, '-e', 'threads', '2',
                   f'{package}.test/{package}.RagInstrumentation',
-                  timeout=660 if args.entry == 'optionalModelDeviceProbe' else 240)
+                  timeout=660 if args.entry in ['optionalModelDeviceProbe', 'pdfReferenceDeviceProbe', 'manualRagDeviceProbe', 'offlineChatDeviceProbe'] else 240)
         (out / 'instrumentation.log').write_text(log)
         report = json.loads(adb('exec-out', 'run-as', package, 'cat', 'files/rag-probe-result.json'))
         (out / 'device-result.json').write_text(json.dumps(report, ensure_ascii=False, indent=2))

@@ -230,7 +230,7 @@ void main() {
     await tester.pumpAndSettle();
     // Follow a related record when available, then return through the vehicle link.
       await tapVisible(tester, find.text('차량 상세'));
-    await tapVisible(tester, find.widgetWithText(OutlinedButton, 'AI 정비지원'));
+    await tapVisible(tester, find.widgetWithText(OutlinedButton, '부품별 정비'));
     final query = tester
         .widget<TextField>(find.byKey(const ValueKey('support-query')))
         .controller!

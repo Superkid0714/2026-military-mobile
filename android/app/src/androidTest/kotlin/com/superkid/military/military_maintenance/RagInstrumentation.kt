@@ -36,7 +36,7 @@ class RagInstrumentation : Instrumentation() {
         entry = arguments?.getString("entry") ?: "ragDeviceProbe"
         qaRunId = arguments?.getString("qaRunId") ?: ""
         require(qaRunId.matches(Regex("[A-Za-z0-9_-]{0,80}")))
-        require(entry in listOf("ragDeviceProbe", "mlDeviceProbe", "memoryWarningDeviceProbe", "optionalModelDeviceProbe", "visionDeviceProbe", "flowDeviceProbe", "systemPilotDeviceProbe", "ragUtilityDeviceProbe"))
+        require(entry in listOf("ragDeviceProbe", "mlDeviceProbe", "offlineChatDeviceProbe", "pdfReferenceDeviceProbe", "manualRagDeviceProbe", "memoryWarningDeviceProbe", "optionalModelDeviceProbe", "visionDeviceProbe", "flowDeviceProbe", "systemPilotDeviceProbe", "ragUtilityDeviceProbe"))
         threads = arguments?.getString("threads")?.toInt() ?: 2
         userWaitMs = arguments?.getString("userWaitMs")?.toInt() ?: 1000
         reuseInstalled = arguments?.getString("reuseInstalled") == "true"
@@ -48,9 +48,9 @@ class RagInstrumentation : Instrumentation() {
     override fun onStart() {
         Thread {
             try {
-              if (!reuseInstalled && entry != "mlDeviceProbe") {
+              if (!reuseInstalled && entry != "mlDeviceProbe" && entry != "offlineChatDeviceProbe") {
                 EmbeddingFiles.install(targetContext, File(targetContext.cacheDir, "maintenance-import-probe.mrag"))
-                if (entry in listOf("optionalModelDeviceProbe", "flowDeviceProbe", "ragUtilityDeviceProbe")) LlmFiles.install(targetContext, File(targetContext.cacheDir, "maintenance-import-llm.gguf"))
+                if (entry in listOf("optionalModelDeviceProbe", "pdfReferenceDeviceProbe", "manualRagDeviceProbe", "flowDeviceProbe", "ragUtilityDeviceProbe")) LlmFiles.install(targetContext, File(targetContext.cacheDir, "maintenance-import-llm.gguf"))
                 if (entry in listOf("visionDeviceProbe", "flowDeviceProbe")) VisionFiles.install(targetContext, File(targetContext.cacheDir, "maintenance-import-vision.onnx"))
                 if (entry == "systemPilotDeviceProbe" || File(targetContext.cacheDir,"maintenance-import-system.msystem").isFile) SystemPilotFiles.install(targetContext,File(targetContext.cacheDir,"maintenance-import-system.msystem"))
               }
@@ -92,10 +92,10 @@ class RagInstrumentation : Instrumentation() {
                     e.dartExecutor.executeDartEntrypoint(DartExecutor.DartEntrypoint(loader.findAppBundlePath(), entry))
                 } catch (e: Throwable) { payload = mapOf("status" to "failed", "error" to e.javaClass.name); completed.countDown() }
             }
-            if (!completed.await(if (entry == "ragUtilityDeviceProbe") 3600 else if (entry in listOf("optionalModelDeviceProbe", "flowDeviceProbe")) 600 else 180, TimeUnit.SECONDS)) payload = mapOf("status" to "failed", "error" to "instrumentation_timeout")
+            if (!completed.await(if (entry == "ragUtilityDeviceProbe") 3600 else if (entry in listOf("optionalModelDeviceProbe", "pdfReferenceDeviceProbe", "manualRagDeviceProbe", "offlineChatDeviceProbe", "flowDeviceProbe")) 600 else 180, TimeUnit.SECONDS)) payload = mapOf("status" to "failed", "error" to "instrumentation_timeout")
             val data = mutableMapOf<Any?, Any?>()
             data.putAll(payload ?: mapOf("status" to "failed", "error" to "empty_result"))
-            data["bundleInstallVerified"] = !reuseInstalled && entry != "mlDeviceProbe"
+            data["bundleInstallVerified"] = !reuseInstalled && entry != "mlDeviceProbe" && entry != "offlineChatDeviceProbe"
             if (entry == "mlDeviceProbe") {
                 val emulator = android.os.Build.FINGERPRINT.startsWith("generic") ||
                     android.os.Build.HARDWARE.contains("ranchu") || android.os.Build.HARDWARE.contains("goldfish")
