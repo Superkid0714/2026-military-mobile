@@ -7,9 +7,11 @@ import 'package:go_router/go_router.dart';
 import '../data/adaptive_runtime.dart';
 import '../data/local_summary.dart';
 import '../data/manual_rag.dart';
+import '../data/offline_assistant.dart';
 import '../data/store.dart';
 import 'components.dart';
 import 'manual_book_reader.dart';
+import 'manual_page_image.dart';
 
 class ManualSearchScreen extends ConsumerStatefulWidget {
   const ManualSearchScreen({this.initialQuery = '', super.key});
@@ -23,7 +25,7 @@ class _ManualSearchState extends ConsumerState<ManualSearchScreen> {
   String document = '', part = '';
   Map<String, Object?>? corpus;
   String? error;
-  bool loading = true, busy = false, summarizing = false;
+  bool loading = true, busy = false;
   ManualRagResult? result;
   GroundedSummary? summary;
   @override
@@ -45,7 +47,7 @@ class _ManualSearchState extends ConsumerState<ManualSearchScreen> {
   }
 
   Future<void> search() async {
-    if (busy || summarizing || query.text.trim().isEmpty) return;
+    if (busy || query.text.trim().isEmpty) return;
     final question = query.text.trim(),
         selectedDocument = document,
         selectedPart = part;
@@ -62,10 +64,20 @@ class _ManualSearchState extends ConsumerState<ManualSearchScreen> {
     setState(() {
       result = found;
       busy = false;
+      final extracted = LocalSummary.directExtract(question, found.evidence);
+      final seen = <String>{};
+      final excerpts = extracted.excerpts
+          .where(
+            (item) =>
+                OfflineAssistant.fitsQuestion(question, item.quote) &&
+                seen.add(OfflineAssistant.plainExplanation(item.quote)),
+          )
+          .toList();
+      summary = GroundedSummary(
+        excerpts.isEmpty ? 'retrieval_only' : 'extractive_summary',
+        excerpts: excerpts,
+      );
     });
-    setState(
-      () => summary = LocalSummary.directExtract(question, found.evidence),
-    );
   }
 
   @override
@@ -85,9 +97,11 @@ class _ManualSearchState extends ConsumerState<ManualSearchScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(e.text),
-                const SizedBox(height: 20),
-                Text('원본 파일 확인번호: ${e.sourceRef?['sha256']}'),
+                ManualPageImageCard(e),
+                ExpansionTile(
+                  title: const Text('책자에서 가져온 글 보기'),
+                  children: [SelectableText(e.text)],
+                ),
               ],
             ),
           ),
@@ -102,7 +116,7 @@ class _ManualSearchState extends ConsumerState<ManualSearchScreen> {
   Widget build(BuildContext context) {
     final documents = (corpus?['documents'] as List? ?? const []).cast<Map>();
     final available = documents.isNotEmpty;
-    final enabled = !busy && !summarizing;
+    final enabled = !busy;
     final evidence = result?.evidence ?? const <MaintenanceEvidence>[];
     return SingleChildScrollView(
       padding: const EdgeInsets.all(24),
@@ -120,64 +134,6 @@ class _ManualSearchState extends ConsumerState<ManualSearchScreen> {
             ),
           ],
           if (available) ...[
-            Text(
-              '${documents.length}권 · 전체 ${corpus?['pages']}쪽 · 텍스트 검색 ${corpus?['searchablePages'] ?? corpus?['pages']}쪽',
-            ),
-            ManualBookReader(documents),
-            const SizedBox(height: 16),
-            Wrap(
-              spacing: 16,
-              runSpacing: 12,
-              children: [
-                SizedBox(
-                  width: 360,
-                  child: DropdownButtonFormField<String>(
-                    initialValue: document,
-                    isExpanded: true,
-                    decoration: const InputDecoration(labelText: '문서 범위'),
-                    items: [
-                      const DropdownMenuItem(value: '', child: Text('전체 책자')),
-                      for (final d in documents)
-                        DropdownMenuItem(
-                          value: d['id'] as String,
-                          child: Text(
-                            d['file'] as String,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                    ],
-                    onChanged: enabled
-                        ? (v) => setState(() {
-                            document = v ?? '';
-                            result = null;
-                            summary = null;
-                          })
-                        : null,
-                  ),
-                ),
-                SizedBox(
-                  width: 280,
-                  child: DropdownButtonFormField<String>(
-                    initialValue: part,
-                    isExpanded: true,
-                    decoration: const InputDecoration(labelText: '본문 부품 필터'),
-                    items: [
-                      const DropdownMenuItem(value: '', child: Text('전체 부품')),
-                      for (final p in standardParts.keys)
-                        DropdownMenuItem(value: p, child: Text(p)),
-                    ],
-                    onChanged: enabled
-                        ? (v) => setState(() {
-                            part = v ?? '';
-                            result = null;
-                            summary = null;
-                          })
-                        : null,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 16),
             TextField(
               controller: query,
               enabled: enabled,
@@ -202,53 +158,162 @@ class _ManualSearchState extends ConsumerState<ManualSearchScreen> {
                     ? search
                     : null,
                 icon: const Icon(Icons.manage_search),
-                label: Text(
-                  busy
-                      ? '원문 검색 중…'
-                      : summarizing
-                      ? '근거 답변 정리 중…'
-                      : '검색',
-                ),
+                label: Text(busy ? '찾는 중…' : '검색'),
               ),
             ),
-            if (busy || summarizing)
-              const MaintenanceLoading(detail: '관련 원문과 그림을 찾고 있어요.'),
+            if (busy) const MaintenanceLoading(detail: '관련 원문과 그림을 찾고 있어요.'),
           ],
+          if (available)
+            ExpansionTile(
+              title: const Text('검색 범위'),
+              subtitle: Text(
+                document.isEmpty && part.isEmpty
+                    ? '전체 책자 · 전체 부품'
+                    : [
+                        if (document.isNotEmpty)
+                          documents.firstWhere(
+                                (item) => item['id'] == document,
+                              )['file']
+                              as String,
+                        if (part.isNotEmpty) part,
+                      ].join(' · '),
+              ),
+              children: [
+                Wrap(
+                  spacing: 16,
+                  runSpacing: 12,
+                  children: [
+                    SizedBox(
+                      width: 360,
+                      child: DropdownButtonFormField<String>(
+                        key: ValueKey(document),
+                        initialValue: document,
+                        isExpanded: true,
+                        decoration: const InputDecoration(labelText: '문서 범위'),
+                        items: [
+                          const DropdownMenuItem(
+                            value: '',
+                            child: Text('전체 책자'),
+                          ),
+                          for (final d in documents)
+                            DropdownMenuItem(
+                              value: d['id'] as String,
+                              child: Text(
+                                d['file'] as String,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                        ],
+                        onChanged: enabled
+                            ? (v) => setState(() {
+                                document = v ?? '';
+                                result = null;
+                                summary = null;
+                              })
+                            : null,
+                      ),
+                    ),
+                    SizedBox(
+                      width: 280,
+                      child: DropdownButtonFormField<String>(
+                        key: ValueKey(part),
+                        initialValue: part,
+                        isExpanded: true,
+                        decoration: const InputDecoration(
+                          labelText: '본문 부품 필터',
+                        ),
+                        items: [
+                          const DropdownMenuItem(
+                            value: '',
+                            child: Text('전체 부품'),
+                          ),
+                          for (final p in standardParts.keys)
+                            DropdownMenuItem(value: p, child: Text(p)),
+                        ],
+                        onChanged: enabled
+                            ? (v) => setState(() {
+                                part = v ?? '';
+                                result = null;
+                                summary = null;
+                              })
+                            : null,
+                      ),
+                    ),
+                  ],
+                ),
+                TextButton(
+                  onPressed: enabled && (document.isNotEmpty || part.isNotEmpty)
+                      ? () => setState(() {
+                          document = '';
+                          part = '';
+                          result = null;
+                          summary = null;
+                        })
+                      : null,
+                  child: const Text('전체로 초기화'),
+                ),
+              ],
+            ),
           if (result != null) ...[
             const SizedBox(height: 20),
-            Text(
-              result!.mode == 'hybrid'
-                  ? '질문 뜻과 입력한 말을 함께 살펴 찾기'
-                  : '입력한 말이 들어 있는 내용부터 찾았습니다.',
-            ),
             if (result!.reason != null) Text(result!.reason!),
-            if (evidence.isEmpty)
-              const Text('질문과 연결할 근거를 찾지 못했습니다. 문서·부품 범위와 질문을 확인해 주세요.'),
+            if (evidence.isEmpty && result!.reason == null)
+              Text(
+                document.isEmpty && part.isEmpty
+                    ? '관련 내용을 찾지 못했어요. 부품 이름과 증상을 함께 입력해 보세요.'
+                    : '선택한 범위에서 찾지 못했어요. 검색 범위를 전체로 바꿔 보세요.',
+              ),
             if (summary?.mode == 'extractive_summary')
               Panel(
                 title: '원문에 근거한 답변',
-                subtitle: '문장을 직접 인용합니다. 인용을 눌러 문맥을 확인하세요.',
+                subtitle: '책자에 나온 내용을 쉬운 말로 정리했습니다.',
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    for (final s in summary!.excerpts) ...[
-                      SelectableText(s.quote),
-                      TextButton(
-                        onPressed: () => source(
-                          evidence.firstWhere((e) => e.id == s.citation),
-                        ),
-                        child: Text(
-                          '출처: ${evidence.firstWhere((e) => e.id == s.citation).location}',
-                        ),
+                    for (final (index, excerpt) in summary!.excerpts.indexed)
+                      Builder(
+                        builder: (context) {
+                          final page = evidence.firstWhere(
+                            (e) => e.id == excerpt.citation,
+                          );
+                          final explanation = Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              SelectableText(
+                                OfflineAssistant.plainExplanation(
+                                  excerpt.quote,
+                                ),
+                                style: const TextStyle(height: 1.55),
+                              ),
+                              TextButton(
+                                onPressed: () => source(page),
+                                child: Text('출처: ${page.location}'),
+                              ),
+                            ],
+                          );
+                          final alreadyShown = summary!.excerpts
+                              .take(index)
+                              .any(
+                                (earlier) =>
+                                    earlier.citation == excerpt.citation,
+                              );
+                          return Padding(
+                            padding: const EdgeInsets.only(bottom: 12),
+                            child: alreadyShown
+                                ? explanation
+                                : ManualPageImageCard(
+                                    page,
+                                    key: ValueKey(page.id),
+                                    explanation: explanation,
+                                  ),
+                          );
+                        },
                       ),
-                    ],
                   ],
                 ),
               ),
-            if (!summarizing &&
-                evidence.isNotEmpty &&
-                summary?.mode != 'extractive_summary')
-              const Text('원문 근거를 표시합니다. 수치·교환주기는 원문과 등록 기준에서 확인해 주세요.'),
+            if (evidence.isNotEmpty && summary?.mode != 'extractive_summary')
+              const Text('관련 페이지를 찾았어요. 정확한 내용은 원문·그림에서 확인해 주세요.'),
             const SizedBox(height: 16),
             for (var i = 0; i < evidence.length; i++)
               Card(
@@ -262,21 +327,20 @@ class _ManualSearchState extends ConsumerState<ManualSearchScreen> {
                         style: const TextStyle(fontWeight: FontWeight.w700),
                       ),
                       Text(evidence[i].location),
-                      Text(
-                        result!.hits[i]['excerpt'] as String,
-                        maxLines: 5,
-                        overflow: TextOverflow.ellipsis,
-                      ),
                       if (result!.hits[i]['kind'] == 'catalog')
                         const Text('품번 참고 자료 · 차량 적용 여부는 별도 확인'),
                       TextButton(
                         onPressed: () => source(evidence[i]),
-                        child: const Text('인용 원문 전체 보기'),
+                        child: const Text('원문·그림 보기'),
                       ),
                     ],
                   ),
                 ),
               ),
+          ],
+          if (available) ...[
+            const SizedBox(height: 16),
+            ManualBookReader(documents),
           ],
         ],
       ),

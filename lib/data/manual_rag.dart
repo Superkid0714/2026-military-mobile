@@ -12,6 +12,18 @@ import 'store.dart';
 String _compactManual(String s) =>
     s.toLowerCase().replaceAll(RegExp(r'[\s_-]+'), '');
 
+// Everyday terms and equivalent wording used in the manuals.
+const _manualSynonyms = [
+  ['전조등', '헤드램프', '헤드라이트'],
+  ['에어필터', '에어클리너', '흡기필터'],
+  ['배터리', '축전지'],
+  ['브레이크패드', '제동패드'],
+  ['오일필터', '오일필터엘리먼트'],
+  ['시동안걸', '시동이안걸', '시동이걸리지', '시동불량', '시동곤란'],
+  ['분리', '탈거'],
+  ['교체', '교환'],
+];
+
 Database _openManual(String path, String hash, String config) {
   final file = File(path);
   if (!file.existsSync() || file.lengthSync() > 1024 * 1024 * 1024) {
@@ -127,6 +139,16 @@ Map<String, Object?> searchManualCorpus({
                 '방법',
                 '관련',
                 '있나',
+                '어디',
+                '어디서',
+                '어디에',
+                '싶어요',
+                '궁금',
+                '궁금해요',
+                '찾아줘',
+                '뭐',
+                '뭔',
+                '뭐야',
               }.contains(t),
         )
         .toSet();
@@ -145,6 +167,21 @@ Map<String, Object?> searchManualCorpus({
       for (var i = 0; i + n <= words.length; i++) {
         terms.add(words.sublist(i, i + n).join());
       }
+    }
+    final compactQuestion = _compactManual(question);
+    final subjects = <String>{};
+    for (final group in _manualSynonyms) {
+      if (group.any(compactQuestion.contains)) {
+        terms.addAll(group);
+        if (group.first != '분리' &&
+            group.first != '교체' &&
+            group.first != '시동안걸') {
+          subjects.addAll(group);
+        }
+      }
+    }
+    for (final name in partsIn(question)) {
+      subjects.addAll([name, ...standardParts[name]!].map(_compactManual));
     }
     final texts = eligible.values
         .map((r) => r['search_text'] as String)
@@ -166,6 +203,7 @@ Map<String, Object?> searchManualCorpus({
     final headingScores = <String, double>{};
     for (final e in eligible.entries) {
       final text = e.value['search_text'] as String;
+      if (subjects.isNotEmpty && !subjects.any(text.contains)) continue;
       var score = 0.0;
       for (final t in terms) {
         final count = patterns[t]!.allMatches(text).length;
@@ -212,13 +250,14 @@ Map<String, Object?> searchManualCorpus({
     if (vector != null) {
       final qnorm = math.sqrt(vector.fold<double>(0, (s, v) => s + v * v));
       if (qnorm == 0) throw const FormatException('zero_query_vector');
-      // Stream a bounded SQLite result. Vectors stay in this isolate and are
+      // Only pages with a lexical match can be returned. Skip vectors for
+      // all other pages. Stream a bounded SQLite result. Vectors stay in this isolate and are
       // never materialized as a large JSON index in Flutter's UI isolate.
       final statement = db.prepare(
         'SELECT page_id,char_start,char_end,vector FROM chunks WHERE page_id=?',
       );
       try {
-        for (final pageId in eligible.keys) {
+        for (final pageId in lexical.keys) {
           for (final c in statement.select([pageId])) {
             final bytes = c['vector'] as Uint8List;
             if (bytes.length != 512 * 4) {
@@ -299,6 +338,16 @@ Map<String, Object?> searchManualCorpus({
         excerpt = String.fromCharCodes(
           runes.sublist(span['start']!, span['end']!),
         );
+      }
+      if (span == null && excerpt.runes.length > 420) {
+        final lines = text.split('\n');
+        final focused = lines.where((line) {
+          final compact = _compactManual(line);
+          return subjects.isEmpty
+              ? terms.any(compact.contains)
+              : subjects.any(compact.contains);
+        }).firstOrNull;
+        excerpt = String.fromCharCodes((focused ?? text).runes.take(420));
       }
       hits.add({
         'id': id,

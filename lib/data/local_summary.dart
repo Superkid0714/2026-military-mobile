@@ -34,6 +34,14 @@ class LocalSummary {
   // Derived display/input only; registered evidence, offsets and hashes stay intact.
   static String canonical(String text) =>
       text.replaceAll(r'\r\n', ' ').replaceAll(RegExp(r'\s+'), ' ').trim();
+  static final _unreadable = RegExp(
+    r'[�-]|\(cid:\d+\)|[ㄱ-ㅎㅏ-ㅣ]{2,}|(?:[가-힣]\s+){4,}[가-힣]',
+    caseSensitive: false,
+  );
+
+  static bool readable(String text) =>
+      text.trim().isNotEmpty && !_unreadable.hasMatch(text);
+
   static String _words(String text) =>
       text.toLowerCase().replaceAll(RegExp(r'[\s_-]+'), '');
 
@@ -113,7 +121,8 @@ class LocalSummary {
         final quote = match.group(0)!.trim();
         if (quote.runes.length < 8 ||
             quote.runes.length > 110 ||
-            numeric.hasMatch(quote)) {
+            numeric.hasMatch(quote) ||
+            !readable(quote)) {
           continue;
         }
         result.add(SummaryExcerpt(item.key, quote));

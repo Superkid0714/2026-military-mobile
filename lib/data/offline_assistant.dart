@@ -108,17 +108,27 @@ class OfflineAssistant {
 
   // Fixed vocabulary/politeness changes only. Keep the complete original beside
   // its citation; no unconstrained paraphrase may add a repair or remove a negation.
-  static String plainExplanation(String quote) => quote
-      .replaceAll(RegExp(r'바\s+이패스'), '바이패스')
-      .replaceAll(RegExp(r'필\s+터'), '필터')
-      .replaceAll(RegExp(r'부\s+트'), '부트')
-      .replaceAll('탈거', '분리')
-      .replaceAll('장착', '설치')
-      .replaceAll('한다.', '합니다.')
-      .replaceAll('않는다.', '않습니다.')
-      .replaceAll('있다.', '있습니다.')
-      .replaceAll('분리시', '분리 시')
-      .replaceAll('교환시', '교환 시');
+  static String plainExplanation(String quote) =>
+      LocalSummary.canonical(quote)
+          .replaceAll(RegExp(r'바\s+이패스'), '바이패스')
+          .replaceAll(RegExp(r'필\s+터'), '필터')
+          .replaceAll(RegExp(r'부\s+트'), '부트')
+          .replaceAll(RegExp(r'엘리\s+먼트|엘리\s+멘트'), '엘리먼트')
+          .replaceAll(RegExp(r'오일\s*필터\s*(엘리먼트|엘리멘트)'), '오일 필터 내부 여과재')
+          .replaceAll(RegExp(r'에어\s*클리너\s*(엘리먼트|엘리멘트)'), '에어 필터 내부 여과재')
+          .replaceAll(RegExp(r'헤드\s*램프'), '전조등')
+          .replaceAll('축전지', '배터리')
+          .replaceAll('탈거', '분리')
+          .replaceAll('장착', '설치')
+          .replaceAll('이탈되어', '빠져')
+          .replaceAll('파손될', '망가질')
+          .replaceAll('교환시', '교환 시')
+          .replaceAll('분리시', '분리 시')
+          .replaceAll('점검 및 교환', '점검하고 교환')
+          .replaceAll('해야 한다.', '해야 합니다.')
+          .replaceAll('한다.', '합니다.')
+          .replaceAll('않는다.', '않습니다.')
+          .replaceAll('있다.', '있습니다.');
 
   static const _glossary = {
     '탈거': '부품을 분리하는 것',
@@ -394,7 +404,7 @@ class OfflineAssistant {
           '${r.date} · ${r.part}: ${_recordOverview(r)}',
         '이 기록은 이전에 한 작업입니다. 현재 같은 고장이 있다는 뜻은 아닙니다.',
       ],
-      if (excerpts.isNotEmpty) '책자에서 질문에 맞는 내용을 확인했습니다. 아래 설명과 출처를 함께 보세요.',
+      if (excerpts.isNotEmpty) '책자에서 찾은 내용입니다.',
       if (evidence.any((e) => e.sourceRef?['textMethod'] == 'ocr')) '관련 배선도 페이지를 찾았습니다. 회로명과 부품 위치는 아래 도면에서 확인해 주세요. 검색용 문자인식에는 오독이 있을 수 있어 핀번호·배선색은 원본 그림에서 확인해야 합니다.',
       if (needsBooks &&
           evidence.isNotEmpty &&

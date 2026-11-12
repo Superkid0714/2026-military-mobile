@@ -1,6 +1,7 @@
 import 'maintenance_loading.dart';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -24,12 +25,58 @@ class ChatScreen extends ConsumerStatefulWidget {
 class _ChatState extends ConsumerState<ChatScreen> {
   final question = TextEditingController();
   final scroll = ScrollController();
+  final latestAnswer = GlobalKey();
   final replies = <OfflineReply>[];
   String? vehicle, error, pending;
-  bool sending = false;
+  bool sending = false, listening = false;
+  static const _speech = MethodChannel('maintenance/offline_speech');
+
+  Future<void> listen() async {
+    if (listening || sending) return;
+    FocusScope.of(context).unfocus();
+    setState(() {
+      listening = true;
+      error = null;
+    });
+    try {
+      final text = await _speech.invokeMethod<String>('listen');
+      if (mounted && text != null && text.trim().isNotEmpty) {
+        final value = String.fromCharCodes(text.trim().runes.take(500));
+        question.value = TextEditingValue(
+          text: value,
+          selection: TextSelection.collapsed(offset: value.length),
+        );
+      }
+    } on PlatformException catch (failure) {
+      if (mounted) {
+        setState(
+          () => error = switch (failure.code) {
+            'permission' => '음성 입력에 마이크 권한이 필요합니다.',
+            'unavailable' => '이 기기에서 오프라인 한국어 음성 입력을 사용할 수 없습니다. 키보드로 입력해 주세요.',
+            _ => '음성을 알아듣지 못했습니다. 다시 말하거나 글로 입력해 주세요.',
+          },
+        );
+      }
+    } on MissingPluginException {
+      if (mounted) setState(() => error = '이 기기에서는 키보드로 질문해 주세요.');
+    } finally {
+      if (mounted) setState(() => listening = false);
+    }
+  }
+
+  Future<void> cancelSpeech() async {
+    try {
+      await _speech.invokeMethod<void>('cancel');
+    } on PlatformException {
+      // The active request completes independently.
+    } on MissingPluginException {
+      // No native input is running on this platform.
+    }
+  }
 
   @override
   void dispose() {
+    if (listening) cancelSpeech();
     question.dispose();
     scroll.dispose();
     super.dispose();
@@ -47,7 +94,7 @@ class _ChatState extends ConsumerState<ChatScreen> {
 
   Future<void> ask() async {
     final q = question.text.trim(), id = vehicle;
-    if (sending || id == null || q.isEmpty) return;
+    if (sending || listening || id == null || q.isEmpty) return;
     final store = ref.read(storeProvider);
     final assistant = ref.read(offlineAssistantProvider);
     final previous = replies.lastOrNull?.searchQuestion;
@@ -58,6 +105,7 @@ class _ChatState extends ConsumerState<ChatScreen> {
     });
     question.clear();
     bottom();
+    var answered = false;
     try {
       final reply = await assistant.ask(
         store,
@@ -72,6 +120,7 @@ class _ChatState extends ConsumerState<ChatScreen> {
         saved = false;
       }
       if (!mounted) return;
+      answered = true;
       setState(() {
         replies.add(reply);
         if (replies.length > 20) replies.removeAt(0);
@@ -92,7 +141,19 @@ class _ChatState extends ConsumerState<ChatScreen> {
           sending = false;
           pending = null;
         });
-        bottom();
+        if (answered) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            final target = latestAnswer.currentContext;
+            if (mounted && target != null) {
+              Scrollable.ensureVisible(
+                target,
+                duration: const Duration(milliseconds: 250),
+              );
+            }
+          });
+        } else {
+          bottom();
+        }
       }
     }
   }
@@ -109,7 +170,11 @@ class _ChatState extends ConsumerState<ChatScreen> {
             children: [
               if (e.sourceRef?['textMethod'] == 'ocr')
                 const Text('검색용 문자인식 결과입니다. 핀번호·배선색은 도면 원본에서 확인해 주세요.'),
-              SelectableText(e.text),
+              ManualPageImageCard(e),
+              ExpansionTile(
+                title: const Text('책자에서 가져온 글 보기'),
+                children: [SelectableText(e.text)],
+              ),
             ],
           ),
         ),
@@ -159,25 +224,43 @@ class _ChatState extends ConsumerState<ChatScreen> {
         if (reply.excerpts.isNotEmpty) ...[
           const SizedBox(height: 16),
           const Text('쉽게 설명하면', style: TextStyle(fontWeight: FontWeight.w700)),
-          for (var i = 0; i < reply.excerpts.length; i++) ...[
-            const SizedBox(height: 12),
-            SelectableText(
-              reply.explanations.length > i
-                  ? reply.explanations[i]
-                  : reply.excerpts[i].quote,
-              style: const TextStyle(fontSize: 15, height: 1.7),
+          for (var i = 0; i < reply.excerpts.length; i++)
+            Builder(
+              builder: (context) {
+                final excerpt = reply.excerpts[i];
+                final evidence = reply.evidence.firstWhere(
+                  (e) => e.id == excerpt.citation,
+                );
+                final explanation = Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    SelectableText(
+                      reply.explanations.length > i
+                          ? reply.explanations[i]
+                          : excerpt.quote,
+                      style: const TextStyle(fontSize: 15, height: 1.7),
+                    ),
+                    TextButton(
+                      onPressed: () => source(evidence),
+                      child: Text('출처: ${evidence.location}'),
+                    ),
+                  ],
+                );
+                final alreadyShown = reply.excerpts
+                    .take(i)
+                    .any((earlier) => earlier.citation == excerpt.citation);
+                return Padding(
+                  padding: const EdgeInsets.only(top: 12),
+                  child: alreadyShown
+                      ? explanation
+                      : ManualPageImageCard(
+                          evidence,
+                          key: ValueKey(evidence.id),
+                          explanation: explanation,
+                        ),
+                );
+              },
             ),
-            TextButton(
-              onPressed: () => source(
-                reply.evidence.firstWhere(
-                  (e) => e.id == reply.excerpts[i].citation,
-                ),
-              ),
-              child: Text(
-                '출처: ${reply.evidence.firstWhere((e) => e.id == reply.excerpts[i].citation).location}',
-              ),
-            ),
-          ],
           if (reply.wordHelp.isNotEmpty)
             Container(
               padding: const EdgeInsets.all(12),
@@ -212,7 +295,7 @@ class _ChatState extends ConsumerState<ChatScreen> {
             ],
           ),
         ],
-        if (reply.excerpts.isNotEmpty ||
+        if (reply.excerpts.isEmpty &&
             reply.evidence.any((e) => e.sourceRef?['textMethod'] == 'ocr')) ...[
           const SizedBox(height: 12),
           Wrap(
@@ -221,12 +304,7 @@ class _ChatState extends ConsumerState<ChatScreen> {
             children: [
               for (final e
                   in reply.evidence
-                      .where(
-                        (e) =>
-                            (reply.excerpts.isEmpty &&
-                                e.sourceRef?['textMethod'] == 'ocr') ||
-                            reply.excerpts.any((s) => s.citation == e.id),
-                      )
+                      .where((e) => e.sourceRef?['textMethod'] == 'ocr')
                       .take(2))
                 ManualPageImageCard(
                   e,
@@ -292,11 +370,7 @@ class _ChatState extends ConsumerState<ChatScreen> {
           child: ListView(
             controller: scroll,
             children: [
-              PageTitle(
-                '정비 도우미',
-                '',
-                scopeVehicles: [selected],
-              ),
+              PageTitle('정비 도우미', '', scopeVehicles: [selected]),
               DropdownButtonFormField<String>(
                 key: ValueKey(vehicle),
                 initialValue: vehicle,
@@ -323,7 +397,7 @@ class _ChatState extends ConsumerState<ChatScreen> {
               const SizedBox(height: 16),
               if (replies.isEmpty && pending == null) ...[
                 Panel(
-                  title: '질문 예시',
+                  title: '추천 질문',
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
@@ -362,7 +436,10 @@ class _ChatState extends ConsumerState<ChatScreen> {
                     child: SelectableText(reply.question),
                   ),
                 ),
-                answer(reply),
+                KeyedSubtree(
+                  key: identical(reply, replies.last) ? latestAnswer : null,
+                  child: answer(reply),
+                ),
                 const SizedBox(height: 20),
               ],
               if (sending) ...[
@@ -380,7 +457,7 @@ class _ChatState extends ConsumerState<ChatScreen> {
         const SizedBox(height: 12),
         TextField(
           controller: question,
-          enabled: !sending,
+          enabled: !sending && !listening,
           minLines: 1,
           maxLines: 3,
           maxLength: 500,
@@ -403,9 +480,21 @@ class _ChatState extends ConsumerState<ChatScreen> {
               child: const Text('새 대화'),
             ),
             const Spacer(),
+            IconButton(
+              tooltip: listening ? '음성 입력 취소' : '음성 입력',
+              onPressed: sending
+                  ? null
+                  : listening
+                  ? cancelSpeech
+                  : listen,
+              icon: Icon(
+                listening ? Icons.stop_circle_outlined : Icons.mic_none,
+              ),
+            ),
             FilledButton.icon(
               key: const ValueKey('assistant-send'),
-              onPressed: !sending && question.text.trim().isNotEmpty
+              onPressed:
+                  !sending && !listening && question.text.trim().isNotEmpty
                   ? ask
                   : null,
               icon: const Icon(Icons.send),
