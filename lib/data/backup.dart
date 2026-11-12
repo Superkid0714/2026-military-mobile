@@ -13,10 +13,16 @@ const _maxBackupBytes = 64 * 1024 * 1024;
 const _maxDecodedBytes = 128 * 1024 * 1024;
 
 class BackupSnapshot {
-  BackupSnapshot._(this.tables, this.metadata, this.photos, this.created);
+  BackupSnapshot._(
+    this.tables,
+    this.metadata,
+    this.photos,
+    this.audio,
+    this.created,
+  );
   final Map<String, List<Map<String, dynamic>>> tables;
   final List<Map<String, dynamic>> metadata;
-  final Map<String, List<int>> photos;
+  final Map<String, List<int>> photos, audio;
   final String created;
   Map<String, int> get counts => {
     for (final e in tables.entries) e.key: e.value.length,
@@ -43,7 +49,8 @@ class BackupSnapshot {
     const error = FormatException('지원하지 않거나 손상된 백업 파일입니다.');
     if (decoded is! Map ||
         decoded['format'] != 'local-maintenance-backup' ||
-        decoded['version'] != 1 ||
+        ![1, 2].contains(decoded['version']) ||
+        (decoded['version'] == 2 && decoded['audio'] is! Map) ||
         decoded['schemaVersion'] != 4 ||
         decoded['tables'] is! Map ||
         decoded['photos'] is! Map ||
@@ -163,6 +170,8 @@ class BackupSnapshot {
                 !text(row['mode'], 300) ||
                 !text(row['note'], 10000) ||
                 row.containsKey('imagePath') ||
+                row.containsKey('audioPath') ||
+                (row['audioPart'] != null && !text(row['audioPart'], 300)) ||
                 row['photoId'] != row['id']) {
               throw error;
             }
@@ -261,16 +270,57 @@ class BackupSnapshot {
       photos[e.key as String] = photo;
     }
     if (photos.length != tables['inspections']!.length) throw error;
+    final audio = <String, List<int>>{};
+    if (decoded['version'] == 2) {
+      for (final e in (decoded['audio'] as Map).entries) {
+        if (!ids['inspections']!.contains(e.key) ||
+            e.value is! String ||
+            (e.value as String).length > 350000) {
+          throw error;
+        }
+        final bytes = base64Decode(e.value as String);
+        if (bytes.length < 12 ||
+            bytes.length > 256 * 1024 ||
+            ascii.decode(bytes.sublist(4, 8), allowInvalid: true) != 'ftyp') {
+          throw error;
+        }
+        audio[e.key as String] = bytes;
+      }
+    }
+    if (tables['inspections']!.any(
+      (row) => row['audioPart'] != null && !audio.containsKey(row['id']),
+    )) {
+      throw error;
+    }
     final metadata = <Map<String, dynamic>>[];
     final metadataKeys = <String>{};
     for (final value in decoded['metadata'] as List) {
       if (value is! Map ||
-          !['mock_dataset', 'maintenance_support'].contains(value['key']) ||
+          ![
+            'mock_dataset',
+            'maintenance_support',
+            'maintenance_schedules',
+            'field_work',
+          ].contains(value['key']) ||
           !metadataKeys.add(value['key'] as String)) {
         throw error;
       }
       if (value['key'] == 'mock_dataset') {
         if (!['rexton-mock-v2', 'rexton-mock-v3'].contains(value['value'])) {
+          throw error;
+        }
+      } else if (value['key'] == 'field_work') {
+        if (value['value'] is! String) throw error;
+        final items = FieldWork.decode(value['value']);
+        if (items.any((item) => !ids['vehicles']!.contains(item.vehicleId))) {
+          throw error;
+        }
+      } else if (value['key'] == 'maintenance_schedules') {
+        if (value['value'] is! String) throw error;
+        final schedules = MaintenanceSchedule.decode(value['value']);
+        if (schedules.any(
+          (item) => !ids['vehicles']!.contains(item.vehicleId),
+        )) {
           throw error;
         }
       } else {
@@ -292,6 +342,7 @@ class BackupSnapshot {
       tables,
       metadata,
       photos,
+      audio,
       decoded['created'] as String,
     );
   }
@@ -301,6 +352,7 @@ extension BackupStorage on AppStore {
   Future<void> exportBackup(File destination) => _mutate(() async {
     final tables = <String, List<Map<String, dynamic>>>{};
     final photos = <String, String>{};
+    final audio = <String, String>{};
     final metadata = <Map<String, dynamic>>[];
     await db!.transaction(() async {
       for (final table in _backupTables) {
@@ -317,7 +369,7 @@ extension BackupStorage on AppStore {
       for (final row
           in await db!
               .customSelect(
-                "SELECT key,value FROM app_metadata WHERE key IN ('mock_dataset','maintenance_support')",
+                "SELECT key,value FROM app_metadata WHERE key IN ('mock_dataset','maintenance_support','maintenance_schedules','field_work')",
               )
               .get()) {
         metadata.add({
@@ -337,16 +389,28 @@ extension BackupStorage on AppStore {
         throw const FormatException('점검 사진이 없거나 너무 큽니다.');
       }
       photos[row['id'] as String] = base64Encode(await image.readAsBytes());
+      final audioPath = row.remove('audioPath') as String?;
+      if (audioPath != null) {
+        final sound = File(audioPath);
+        if (audioPath != '${image.path}.m4a' ||
+            !await sound.exists() ||
+            await sound.length() < 12 ||
+            await sound.length() > 256 * 1024) {
+          throw const FormatException('점검 녹음 파일을 확인해 주세요.');
+        }
+        audio[row['id'] as String] = base64Encode(await sound.readAsBytes());
+      }
       row['photoId'] = row['id'];
     }
     final value = {
       'format': 'local-maintenance-backup',
-      'version': 1,
+      'version': audio.isEmpty ? 1 : 2,
       'schemaVersion': 4,
       'created': clock().toIso8601String(),
       'tables': tables,
       'metadata': metadata,
       'photos': photos,
+      if (audio.isNotEmpty) 'audio': audio,
     };
     final encoded = await compute(_encodeBackup, value);
     final temporary = File('${destination.path}.${newId('TMP')}.partial');
@@ -365,7 +429,7 @@ extension BackupStorage on AppStore {
     // Revalidate the mutable payload before changing files or the live database.
     final value = {
       'format': 'local-maintenance-backup',
-      'version': 1,
+      'version': snapshot.audio.isEmpty ? 1 : 2,
       'schemaVersion': 4,
       'created': snapshot.created,
       'tables': snapshot.tables,
@@ -373,6 +437,10 @@ extension BackupStorage on AppStore {
       'photos': {
         for (final e in snapshot.photos.entries) e.key: base64Encode(e.value),
       },
+      if (snapshot.audio.isNotEmpty)
+        'audio': {
+          for (final e in snapshot.audio.entries) e.key: base64Encode(e.value),
+        },
     };
     final checked = BackupSnapshot._validate(value);
     final folder = Directory('${imageDirectory.path}/${newId('RESTORE')}');
@@ -386,6 +454,8 @@ extension BackupStorage on AppStore {
       questions: questions,
       predictions: predictions,
       history: predictionHistory,
+      schedules: schedules,
+      fieldWork: fieldWork,
     );
     final previousDirty = Map<String, String>.from(_dirtyVehicles);
     final previousSupport = supportLibrary;
@@ -395,6 +465,11 @@ extension BackupStorage on AppStore {
         final file = File('${folder.path}/$id.jpg');
         await file.writeAsBytes(checked.photos[id]!, flush: true);
         row['imagePath'] = file.path;
+        if (checked.audio[id] case final bytes?) {
+          final audioFile = File('${file.path}.m4a');
+          await audioFile.writeAsBytes(bytes, flush: true);
+          row['audioPath'] = audioFile.path;
+        }
       }
       await db!.transaction(() async {
         for (final table in _backupTables.reversed) {
@@ -402,7 +477,7 @@ extension BackupStorage on AppStore {
         }
         // Onboarding belongs to this device and is not part of a portable backup.
         await db!.customStatement(
-          "DELETE FROM app_metadata WHERE key IN ('mock_dataset','maintenance_support')",
+          "DELETE FROM app_metadata WHERE key IN ('mock_dataset','maintenance_support','maintenance_schedules','field_work')",
         );
         for (final table in _backupTables) {
           for (final row in checked.tables[table]!) {
@@ -442,6 +517,8 @@ extension BackupStorage on AppStore {
         questions = previous.questions;
         predictions = previous.predictions;
         predictionHistory = previous.history;
+        schedules = previous.schedules;
+        fieldWork = previous.fieldWork;
         _dirtyVehicles
           ..clear()
           ..addAll(previousDirty);

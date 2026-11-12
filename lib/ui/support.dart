@@ -8,6 +8,8 @@ import '../data/local_rag.dart';
 import '../data/rag_ranking.dart';
 import '../data/local_summary.dart';
 import 'components.dart';
+import 'maintenance_calendar.dart';
+import 'schedule_editor.dart';
 import 'knowledge_tools.dart';
 
 String supportUrl(String vehicle, [String part = '', String? inspectionId]) =>
@@ -208,11 +210,7 @@ class _SupportState extends ConsumerState<SupportScreen> {
     return ListView(
       controller: scroll,
       children: [
-        PageTitle(
-          '부품별 정비',
-          '',
-          scopeVehicles: [v],
-        ),
+        PageTitle('부품별 정비', '', scopeVehicles: [v]),
         if (ref.watch(adaptiveRuntimeProvider).modelInfo['corpusDatabasePath']
             is String)
           Align(
@@ -433,8 +431,7 @@ class _SupportState extends ConsumerState<SupportScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              if (evidence.isNotEmpty)
-                const Text('정비 주기는 아래에 등록된 기준을 확인하세요.'),
+              if (evidence.isNotEmpty) const Text('정비 주기는 아래에 등록된 기준을 확인하세요.'),
               if (evidence.isEmpty) empty('관련 책자 내용을 찾지 못했습니다.'),
               if (ref
                   .watch(adaptiveRuntimeProvider)
@@ -746,7 +743,7 @@ class RuleTile extends StatelessWidget {
           ],
           Text(
             rule.templateId == null
-                ? '근거: ${rule.source}'
+                ? '근거: ${rule.source.replaceFirst('운용 예시의 점검 간격 · 실제 적용 시 지침 확인', '체험 차량의 점검 기준')}'
                 : result.sourceRef == null
                 ? '판정 적용 보류 · 일반·가혹 원문은 반입 자료에서 확인하세요.'
                 : '판정 근거: ${result.sourceRef!['file']} · PDF ${result.sourceRef!['page']}쪽 · ${result.sourceRef!['location']}',
@@ -794,11 +791,13 @@ class MaintenancePlanScreen extends ConsumerStatefulWidget {
 
 class _PlanState extends ConsumerState<MaintenancePlanScreen> {
   int? year;
+  int? month, selectedDay;
   late String? vehicle = widget.vehicleId;
   @override
   Widget build(BuildContext context) {
     final s = ref.watch(storeProvider);
     year ??= s.clock().year;
+    month ??= s.clock().month;
     if (vehicle != null && !s.vehicles.any((v) => v.id == vehicle)) {
       vehicle = null;
     }
@@ -814,12 +813,56 @@ class _PlanState extends ConsumerState<MaintenancePlanScreen> {
             (a, b) => (s.serviceDistance(a).remainingKm ?? 1000000000000)
                 .compareTo(s.serviceDistance(b).remainingKm ?? 1000000000000),
           );
-    final dates = {for (final r in rules) r.id: s.estimatedServiceDate(r)};
+    final schedules = s.schedules
+        .where(
+          (item) => vehicle == null
+              ? s.activeVehicles.any((v) => v.id == item.vehicleId)
+              : item.vehicleId == vehicle,
+        )
+        .toList();
+    final counts = <int, int>{};
+    for (final item in schedules) {
+      final date = DateTime.parse(item.date);
+      if (date.year == year && date.month == month) {
+        counts.update(date.day, (count) => count + 1, ifAbsent: () => 1);
+      }
+    }
+    final dailySchedules = schedules.where((item) {
+      final date = DateTime.parse(item.date);
+      return date.year == year &&
+          date.month == month &&
+          (selectedDay == null || date.day == selectedDay);
+    }).toList();
+    Future<void> edit([MaintenanceSchedule? schedule]) async {
+      final chosen = await showDialog<DateTime>(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => ScheduleEditor(
+          store: s,
+          date: DateTime(year!, month!, selectedDay ?? 1),
+          vehicleId: vehicle,
+          schedule: schedule,
+        ),
+      );
+      if (chosen != null && mounted) {
+        setState(() {
+          year = chosen.year;
+          month = chosen.month;
+          selectedDay = chosen.day;
+        });
+      }
+    }
+
     return ListView(
       children: [
         PageTitle(
           '연간 정비계획',
-          '등록 주기와 최근 90일 운용 추세로 차량·부품별 다음 정비 시점을 확인합니다.',
+          '',
+          action: FilledButton.icon(
+            onPressed: s.vehicles.isEmpty ? null : () => edit(),
+            icon: const Icon(Icons.add),
+            label: const Text('일정 추가'),
+          ),
           scopeVehicles: vehicle == null
               ? s.activeVehicles
               : [s.vehicle(vehicle!)],
@@ -862,9 +905,6 @@ class _PlanState extends ConsumerState<MaintenancePlanScreen> {
                   ),
                 ],
               ),
-              note(
-                '예상일은 최근 운용 증가량을 일평균으로 환산한 참고값입니다. 7일 이상 관측·2건 이상 기록·30일 이내 최신 기록이 필요합니다. 다음 1회 정비만 표시하며 실제 교환 후 기준을 갱신해 주세요.',
-              ),
               const SizedBox(height: 12),
               FilledButton(
                 onPressed: () async {
@@ -894,38 +934,86 @@ class _PlanState extends ConsumerState<MaintenancePlanScreen> {
           ),
         ),
         const SizedBox(height: 16),
-        if (rules.isEmpty) empty('등록된 정비 주기가 없습니다.'),
-        for (var month = 1; month <= 12; month++)
-          if (rules.any(
-            (r) => dates[r.id]?.year == year && dates[r.id]?.month == month,
-          ))
-            Padding(
-              padding: const EdgeInsets.only(bottom: 12),
-              child: Panel(
-                title: '$year년 $month월',
-                child: Column(
-                  children: [
-                    for (final r in rules.where(
-                      (r) =>
-                          dates[r.id]?.year == year &&
-                          dates[r.id]?.month == month,
-                    ))
-                      ListTile(
-                        contentPadding: EdgeInsets.zero,
-                        title: Text('${r.vehicleId} · ${standardPart(r.part)}'),
-                        subtitle: Text(
-                          '예상 ${day(dates[r.id]!)} · 잔여 ${number(s.serviceDistance(r).remainingKm!)} km',
-                        ),
-                        onTap: () =>
-                            context.go(supportUrl(r.vehicleId, r.part)),
-                      ),
-                  ],
-                ),
+        Panel(
+          title: '점검 달력',
+          subtitle: '날짜를 선택하고 일정을 추가하세요.',
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              MaintenanceCalendar(
+                month: DateTime(year!, month!),
+                counts: counts,
+                selected: selectedDay,
+                onMonthChanged: (date) => setState(() {
+                  year = date.year;
+                  month = date.month;
+                  selectedDay = null;
+                }),
+                onSelected: (day) => setState(() => selectedDay = day),
               ),
-            ),
+              const Divider(height: 24),
+              Text(
+                selectedDay == null ? '$month월 일정' : '$month월 $selectedDay일 일정',
+                style: const TextStyle(fontWeight: FontWeight.w800),
+              ),
+              if (dailySchedules.isEmpty)
+                const Padding(
+                  padding: EdgeInsets.only(top: 8),
+                  child: Text('등록된 일정이 없습니다.'),
+                ),
+              for (final item in dailySchedules)
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: Text(
+                    '${vehicleLabel(item.vehicleId)} · ${item.title}',
+                  ),
+                  subtitle: Text(
+                    '${item.date}${item.note.isEmpty ? '' : '\n${item.note}'}',
+                  ),
+                  onTap: () => edit(item),
+                  trailing: IconButton(
+                    tooltip: '일정 삭제',
+                    icon: const Icon(Icons.delete_outline),
+                    onPressed: () async {
+                      final confirmed = await showDialog<bool>(
+                        context: context,
+                        builder: (context) => AlertDialog(
+                          title: const Text('일정을 삭제할까요?'),
+                          content: Text(item.title),
+                          actions: [
+                            TextButton(
+                              onPressed: () => Navigator.pop(context, false),
+                              child: const Text('취소'),
+                            ),
+                            FilledButton(
+                              onPressed: () => Navigator.pop(context, true),
+                              child: const Text('삭제'),
+                            ),
+                          ],
+                        ),
+                      );
+                      if (confirmed != true) return;
+                      try {
+                        await s.deleteSchedule(item.id);
+                      } catch (_) {
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('삭제하지 못했습니다. 다시 시도해 주세요.'),
+                            ),
+                          );
+                        }
+                      }
+                    },
+                  ),
+                ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 16),
+        if (rules.isEmpty) empty('등록된 정비 주기가 없습니다.'),
         Panel(
           title: '정비 주기 전체',
-          subtitle: '계산 보류 및 선택 연도 밖의 항목도 포함합니다.',
           child: Column(
             children: [
               for (final r in rules) ...[
@@ -937,7 +1025,7 @@ class _PlanState extends ConsumerState<MaintenancePlanScreen> {
                     title: Text('${r.vehicleId} · ${standardPart(r.part)}'),
                     subtitle: Text(
                       s.serviceDistance(r).reason ??
-                          '잔여 ${number(s.serviceDistance(r).remainingKm!)} km · ${dates[r.id] == null ? '예상 날짜는 운용 기록 축적 후 표시됩니다.' : '다음 예상일 ${day(dates[r.id]!)}'}',
+                          '잔여 ${number(s.serviceDistance(r).remainingKm!)} km',
                     ),
                     onTap: () => context.go(supportUrl(r.vehicleId, r.part)),
                   ),

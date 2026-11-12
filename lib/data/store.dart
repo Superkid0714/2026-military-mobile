@@ -17,6 +17,8 @@ part 'maintenance_support.dart';
 part 'knowledge_import.dart';
 part 'service_policy.dart';
 part 'presentation_fleet.dart';
+part 'maintenance_schedule.dart';
+part 'field_work.dart';
 
 enum VehicleStatus { normal, caution, danger, unavailable }
 
@@ -142,13 +144,15 @@ class Inspection {
     required this.created,
     required this.imagePath,
     required this.note,
+    this.audioPath,
+    this.audioPart,
     this.conceptId,
     this.conceptConfirmedAt,
     this.vision,
     this.front = const {},
   });
   final String id, vehicleId, area, mode, created, imagePath, note;
-  final String? conceptId, conceptConfirmedAt;
+  final String? conceptId, conceptConfirmedAt, audioPath, audioPart;
   final Map<String, dynamic>? vision;
   final Map<FrontPart, FrontObservation> front;
   String? get confirmedConceptId =>
@@ -160,12 +164,16 @@ class Inspection {
     'mode': mode,
     'created': created,
     'imagePath': imagePath,
+    if (audioPath != null) 'audioPath': audioPath,
+    if (audioPart != null) 'audioPart': audioPart,
     'note': note,
     if (conceptId != null) 'conceptId': conceptId,
     if (conceptConfirmedAt != null) 'conceptConfirmedAt': conceptConfirmedAt,
     if (vision != null) 'vision': vision,
     if (front.isNotEmpty)
-      'front': {for (final entry in front.entries) entry.key.name: entry.value.toJson()},
+      'front': {
+        for (final entry in front.entries) entry.key.name: entry.value.toJson(),
+      },
   };
   factory Inspection.fromJson(Map<String, dynamic> j) => Inspection(
     id: j['id'],
@@ -174,6 +182,8 @@ class Inspection {
     mode: j['mode'],
     created: j['created'],
     imagePath: j['imagePath'],
+    audioPath: j['audioPath'] as String?,
+    audioPart: j['audioPart'] as String?,
     note: j['note'],
     front: FrontObservation.decode(j['front']),
     conceptId: j['conceptId'] as String?,
@@ -287,6 +297,8 @@ class AppStore extends ChangeNotifier {
   List<Vehicle> vehicles = [];
   List<Maintenance> records = [];
   List<Inspection> inspections = [];
+  List<MaintenanceSchedule> schedules = [];
+  List<FieldWork> fieldWork = [];
   List<Map<String, dynamic>> operations = [], questions = [];
   List<Map<String, dynamic>> temporalChanges = [];
   List<Vehicle> get registeredVehicles =>
@@ -456,6 +468,22 @@ class AppStore extends ChangeNotifier {
     inspections = (await _rows('inspections'))
         .map(Inspection.fromJson)
         .toList();
+    final scheduleRow = await db!
+        .customSelect(
+          "SELECT value FROM app_metadata WHERE key='maintenance_schedules'",
+        )
+        .getSingleOrNull();
+    schedules =
+        scheduleRow == null
+              ? []
+              : MaintenanceSchedule.decode(scheduleRow.read<String>('value'))
+          ..sort((a, b) => a.date.compareTo(b.date));
+    final fieldRow = await db!
+        .customSelect("SELECT value FROM app_metadata WHERE key='field_work'")
+        .getSingleOrNull();
+    fieldWork =
+        fieldRow == null ? [] : FieldWork.decode(fieldRow.read<String>('value'))
+          ..sort((a, b) => b.created.compareTo(a.created));
     supportLibrary = await _readSupportLibrary();
     temporalChanges = supportLibrary.knowledge.templates.isEmpty
         ? []
@@ -801,6 +829,26 @@ class AppStore extends ChangeNotifier {
           ..remove('conceptId')
           ..remove('conceptConfirmedAt');
         FrontObservation.decode(data['front']);
+        final audio = value.audioPath;
+        if (value.audioPart != null &&
+            (audio == null ||
+                value.audioPart!.trim().isEmpty ||
+                value.audioPart!.length > 300)) {
+          throw ArgumentError('녹음한 부위를 확인해 주세요.');
+        }
+        if (audio != null &&
+            (audio != '${value.imagePath}.m4a' ||
+                !await File(audio).exists() ||
+                await File(audio).length() == 0 ||
+                await File(audio).length() > 256 * 1024)) {
+          throw ArgumentError('녹음 파일을 확인해 주세요.');
+        }
+        if (audio == null &&
+            before?.imagePath == value.imagePath &&
+            before?.audioPath != null) {
+          data['audioPath'] = before!.audioPath;
+          if (before.audioPart != null) data['audioPart'] = before.audioPart;
+        }
         if (confirmedConceptId != null) {
           if (before == null ||
               before.imagePath != value.imagePath ||
