@@ -2,8 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import '../data/store.dart';
+import '../data/clock.dart';
 import '../data/inspection_priority.dart';
+import '../data/store.dart';
+import 'analysis_charts.dart';
 import 'components.dart';
 import 'front_inspection.dart';
 import 'support.dart';
@@ -76,7 +78,7 @@ class _VehiclesState extends ConsumerState<VehiclesScreen> {
         if (s.registeredVehicles.isNotEmpty)
           CheckboxListTile(
             value: showExamples,
-            title: const Text('분석용 차량 함께 보기'),
+            title: const Text('전체 차량 함께 보기'),
             onChanged: (value) => setState(() {
               showExamples = value ?? false;
               page = 0;
@@ -466,7 +468,8 @@ Widget _recordTable(BuildContext context, List<Maintenance> records) =>
       );
 
 class RecordsScreen extends ConsumerStatefulWidget {
-  const RecordsScreen({super.key});
+  const RecordsScreen({this.thisMonth = false, super.key});
+  final bool thisMonth;
   @override
   ConsumerState<RecordsScreen> createState() => _RecordsState();
 }
@@ -492,12 +495,36 @@ class _RecordsState extends ConsumerState<RecordsScreen> {
       if (s.vehicles.any((v) => v.id == value)) vehicle = value!;
       initialized = true;
     }
+    final now = ref.watch(currentTimeProvider);
+    final monthStart = DateTime(now.year, now.month);
+    final monthEnd = DateTime(now.year, now.month, now.day + 1);
+    final priorityVehicles = vehicle == '전체'
+        ? s.dashboardVehicles
+        : [s.vehicle(vehicle)];
+    final priorities =
+        [
+          if (widget.thisMonth)
+            for (final v in priorityVehicles)
+              for (final p in s.inspectionPriorities(v.id))
+                if (p.order < 2) (v, p),
+        ]..sort((a, b) {
+          final priority = a.$2.order.compareTo(b.$2.order);
+          if (priority != 0) return priority;
+          final vehicleOrder = a.$1.id.compareTo(b.$1.id);
+          return vehicleOrder == 0
+              ? a.$2.part.compareTo(b.$2.part)
+              : vehicleOrder;
+        });
     final rows = s.records
         .where(
           (r) =>
               (vehicle == '전체'
-                  ? s.activeVehicles.any((v) => v.id == r.vehicleId)
+                  ? (widget.thisMonth ? s.dashboardVehicles : s.activeVehicles)
+                        .any((v) => v.id == r.vehicleId)
                   : r.vehicleId == vehicle) &&
+              (!widget.thisMonth ||
+                  (!DateTime.parse(r.date).isBefore(monthStart) &&
+                      DateTime.parse(r.date).isBefore(monthEnd))) &&
               (system == '전체' || r.system == system) &&
               '${r.vehicleId} ${vehicleLabel(r.vehicleId)} ${r.part} ${maintenanceDescriptionLabel(r)}'
                   .contains(search.text),
@@ -512,16 +539,53 @@ class _RecordsState extends ConsumerState<RecordsScreen> {
     return ListView(
       children: [
         PageTitle(
-          '정비 기록',
-          '차량별 정비 이력을 검색하고 상세 내용을 확인합니다.',
+          widget.thisMonth ? '이번 달 정비' : '정비 기록',
+          '지난 작업을 찾아보거나 새 기록을 남기세요.',
           scopeVehicles: vehicle == '전체'
-              ? s.activeVehicles
+              ? (widget.thisMonth ? s.dashboardVehicles : s.activeVehicles)
               : [s.vehicle(vehicle)],
           action: FilledButton(
             onPressed: () => context.go('/entry'),
-            child: const Text('정비 등록'),
+            child: const Text('기록 쓰기'),
           ),
         ),
+        Wrap(
+          spacing: 8,
+          children: [
+            TextButton(
+              onPressed: widget.thisMonth ? () => context.go('/records') : null,
+              child: const Text('전체 정비 기록'),
+            ),
+            TextButton(
+              onPressed: widget.thisMonth
+                  ? null
+                  : () => context.go('/records?period=month'),
+              child: const Text('이번 달 정비'),
+            ),
+            TextButton(
+              onPressed: () => context.go('/operations'),
+              child: const Text('운행 기록'),
+            ),
+          ],
+        ),
+        if (widget.thisMonth)
+          Panel(
+            title: '우선 점검',
+            child: priorities.isEmpty
+                ? const Text('주기가 지난 부품이나 반복 수리 기록이 없습니다.')
+                : Column(
+                    children: [
+                      for (final (v, p) in priorities.take(10))
+                        ListTile(
+                          contentPadding: EdgeInsets.zero,
+                          title: Text('${vehicleLabel(v.id)} · ${p.part}'),
+                          subtitle: Text(p.reason),
+                          trailing: Text(p.order == 0 ? '주기 도래' : '반복 수리'),
+                          onTap: () => context.push(supportUrl(v.id, p.part)),
+                        ),
+                    ],
+                  ),
+          ),
         Panel(
           title: '검색 및 필터',
           child: Wrap(
@@ -838,6 +902,18 @@ class _AnalysisState extends ConsumerState<AnalysisScreen> {
     for (final r in rows) {
       months.update(r.date.substring(0, 7), (v) => v + 1, ifAbsent: () => 1);
     }
+    if (months.length > 1) {
+      final observed = months.keys.toList()..sort();
+      final first = DateTime.parse('${observed.first}-01');
+      final last = DateTime.parse('${observed.last}-01');
+      for (
+        var month = first;
+        month.isBefore(last);
+        month = DateTime(month.year, month.month + 1)
+      ) {
+        months.putIfAbsent(month.toIso8601String().substring(0, 7), () => 0);
+      }
+    }
     final ranked = [...s.activeVehicles]
       ..sort(
         (a, b) => rows
@@ -853,8 +929,12 @@ class _AnalysisState extends ConsumerState<AnalysisScreen> {
       children: [
         PageTitle(
           '정비 분석',
-          '조회 대상 차량의 정비 발생 현황과 비용을 분석합니다.',
+          '언제 어떤 정비를 했는지, 비용은 얼마나 들었는지 확인하세요.',
           scopeVehicles: s.activeVehicles,
+          action: OutlinedButton(
+            onPressed: () => context.go('/ai-history'),
+            child: const Text('지난 분석 결과'),
+          ),
         ),
         Panel(
           title: '분석 기간',
@@ -919,20 +999,10 @@ class _AnalysisState extends ConsumerState<AnalysisScreen> {
         ResponsiveColumns(
           children: [
             Panel(
-              title: '장치 종류별 정비 현황',
-              child: rows.isEmpty
-                  ? empty('해당 기간의 기록이 없습니다.')
-                  : Bars(_systemCounts(rows)),
+              title: '정비 종류별 건수',
+              child: MaintenanceBreakdown(_systemCounts(rows)),
             ),
-            Panel(
-              title: '월별 정비 건수 추이',
-              child: Bars(
-                Map.fromEntries(
-                  months.entries.toList()
-                    ..sort((a, b) => a.key.compareTo(b.key)),
-                ),
-              ),
-            ),
+            Panel(title: '월별 정비 건수', child: MaintenanceTrend(months)),
           ],
         ),
         const SizedBox(height: 16),

@@ -7,10 +7,13 @@ import 'package:intl/intl.dart';
 import '../data/store.dart';
 import '../design_assets.dart';
 
-const green = Color(0xFF00733B),
-    ink = Color(0xFF191C1D),
-    muted = Color(0xFF66727E),
-    line = Color(0xFFE2E7EB),
+const green = Color(0xFF0B6E4D),
+    brandFill = Color(0xFF00DE5A),
+    brandAccent = Color(0xFF00DE5A),
+    brandTint = Color(0xFFE8F5EF),
+    ink = Color(0xFF20252B),
+    muted = Color(0xFF525D68),
+    line = Color(0xFFE4E9EC),
     surface = Color(0xFFF4F6F8);
 // Presentation labels do not alter source values or vehicle identity.
 String modelLabel(String model) =>
@@ -155,7 +158,7 @@ class DataScopeNotice extends StatelessWidget {
         ? '등록 차량 $registered대'
         : registered == 0
         ? ids.every((id) => id.startsWith('MOCK-OPS-'))
-              ? '운용 예시 $examples대'
+              ? '운용 차량 $examples대'
               : '분석용 차량 $examples대'
         : '등록 차량 $registered대 · 분석용 차량 $examples대 혼합';
     return Align(

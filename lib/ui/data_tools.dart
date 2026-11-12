@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:go_router/go_router.dart';
 
 import '../data/store.dart';
 import 'components.dart';
@@ -29,7 +30,8 @@ class NativeBackupFiles {
 }
 
 class DataToolsScreen extends ConsumerStatefulWidget {
-  const DataToolsScreen({super.key});
+  const DataToolsScreen({this.operationsOnly = false, super.key});
+  final bool operationsOnly;
   @override
   ConsumerState<DataToolsScreen> createState() => _DataToolsState();
 }
@@ -230,8 +232,9 @@ class _DataToolsState extends ConsumerState<DataToolsScreen> {
   @override
   Widget build(BuildContext context) {
     final s = ref.watch(storeProvider);
-    if (!s.vehicles.any((v) => v.id == vehicleId)) {
-      vehicleId = s.vehicles.first.id;
+    final vehicles = widget.operationsOnly ? s.dashboardVehicles : s.vehicles;
+    if (!vehicles.any((v) => v.id == vehicleId)) {
+      vehicleId = vehicles.firstOrNull?.id;
       operationPage = 0;
     }
     final rows = s.operations.where((r) => r['vehicleId'] == vehicleId).toList()
@@ -246,12 +249,28 @@ class _DataToolsState extends ConsumerState<DataToolsScreen> {
     return ListView(
       children: [
         PageTitle(
-          '데이터 관리',
-          '기기 안의 기록을 백업·복원하고 운용 기록을 수정합니다.',
-          scopeVehicles: s.vehicles,
-          scopeLabel: '백업 대상',
+          widget.operationsOnly ? '운행 기록' : '데이터 관리',
+          widget.operationsOnly
+              ? '차량별 누적 주행거리와 운행 기록을 확인하세요.'
+              : '기기 안의 기록을 백업·복원하고 운용 기록을 수정합니다.',
+          scopeVehicles: vehicles,
+          scopeLabel: widget.operationsOnly ? '조회 대상' : '백업 대상',
+          action: widget.operationsOnly
+              ? TextButton(
+                  onPressed: () => context.go('/records'),
+                  child: const Text('정비 기록'),
+                )
+              : null,
         ),
-        if (s.presentationVehicles.isEmpty)
+        if (!widget.operationsOnly && s.presentationVehicles.isNotEmpty)
+          const Padding(
+            padding: EdgeInsets.only(bottom: 16),
+            child: Text(
+              '운용 차량 묶음은 시연을 위해 생성한 기록입니다.',
+              style: TextStyle(color: muted, fontSize: 12),
+            ),
+          ),
+        if (!widget.operationsOnly && s.presentationVehicles.isEmpty)
           Padding(
             padding: const EdgeInsets.only(bottom: 16),
             child: OutlinedButton.icon(
@@ -259,10 +278,10 @@ class _DataToolsState extends ConsumerState<DataToolsScreen> {
                   ? null
                   : () => run(() async {
                       await s.loadPresentationFleet();
-                      return '운용 예시 12대의 기록과 점검 계획을 추가했습니다.';
+                      return '운용 차량 12대의 기록과 점검 계획을 추가했습니다.';
                     }),
               icon: const Icon(Icons.add_chart),
-              label: const Text('운용 예시 채우기'),
+              label: const Text('운용 차량 채우기'),
             ),
           ),
         if (busy && !preview)
@@ -272,182 +291,189 @@ class _DataToolsState extends ConsumerState<DataToolsScreen> {
             padding: const EdgeInsets.only(bottom: 16),
             child: note(message!),
           ),
-        Panel(
-          title: '기록 파일 저장·불러오기',
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                '차량·정비·운용·질문·분석·변경 이력과 점검 사진을 한 파일에 보관합니다. 암호화되지 않은 백업이므로 보관 위치를 직접 선택해 주세요. 기기나 USB에 파일을 저장할 수 있습니다.',
-              ),
-              const SizedBox(height: 16),
-              Wrap(
-                spacing: 12,
-                runSpacing: 12,
-                children: [
-                  FilledButton.icon(
-                    key: const ValueKey('export-backup'),
-                    onPressed: busy ? null : export,
-                    icon: const Icon(Icons.save_alt),
-                    label: const Text('백업 파일 저장'),
-                  ),
-                  OutlinedButton.icon(
-                    key: const ValueKey('import-backup'),
-                    onPressed: busy ? null : restore,
-                    icon: const Icon(Icons.restore),
-                    label: const Text('백업 파일 복원'),
-                  ),
-                  OutlinedButton.icon(
-                    key: const ValueKey('import-knowledge'),
-                    onPressed: busy
-                        ? null
-                        : () => run(
-                            () => importKnowledgeFile(
-                              context,
-                              ref.read(storeProvider),
-                            ),
-                          ),
-                    icon: const Icon(Icons.library_add),
-                    label: const Text('정비 자료 반입'),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 16),
-        if (s.supportLibrary.knowledge.concepts.isNotEmpty) ...[
-          KnowledgePanel(store: s),
-          const SizedBox(height: 16),
-        ],
-        Panel(
-          title: '운용 기록 관리',
-          subtitle: '전체 기간의 운용 기록 · 정비 수정·삭제는 정비 기록 상세에서 가능합니다.',
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              DataScopeNotice([s.vehicle(vehicleId!)]),
-              const SizedBox(height: 12),
-              DropdownButtonFormField<String>(
-                key: ValueKey('manage-$vehicleId'),
-                initialValue: vehicleId,
-                items: s.vehicles
-                    .map(
-                      (v) => DropdownMenuItem(value: v.id, child: Text(v.id)),
-                    )
-                    .toList(),
-                onChanged: busy
-                    ? null
-                    : (v) => setState(() {
-                        vehicleId = v;
-                        operationPage = 0;
-                      }),
-              ),
-              const SizedBox(height: 12),
-              if (rows.isEmpty)
-                const Text('운용 기록이 없습니다.')
-              else
-                SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: DataTable(
-                    columns: [
-                      for (final label in [
-                        '기록 시각',
-                        '거리(km)',
-                        '시간(H)',
-                        '유류(L)',
-                        '관리',
-                      ])
-                        DataColumn(label: Text(label)),
-                    ],
-                    rows: rows
-                        .skip(operationPage * 12)
-                        .take(12)
-                        .map(
-                          (r) => DataRow(
-                            cells: [
-                              DataCell(Text(r['created'] as String)),
-                              DataCell(Text(number(r['distance'] as num))),
-                              DataCell(Text(number(r['hours'] as num))),
-                              DataCell(Text(number(r['fuel'] as num))),
-                              DataCell(
-                                Row(
-                                  children: [
-                                    IconButton(
-                                      key: ValueKey('edit-op-${r['id']}'),
-                                      tooltip: '수정',
-                                      onPressed: busy
-                                          ? null
-                                          : () => editOperation(r),
-                                      icon: const Icon(Icons.edit_outlined),
-                                    ),
-                                    IconButton(
-                                      key: ValueKey('delete-op-${r['id']}'),
-                                      tooltip: '삭제',
-                                      onPressed: busy
-                                          ? null
-                                          : () => deleteOperation(r),
-                                      icon: const Icon(Icons.delete_outline),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ],
-                          ),
-                        )
-                        .toList(),
-                  ),
+        if (!widget.operationsOnly)
+          Panel(
+            title: '기록 파일 저장·불러오기',
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  '차량·정비·운용·질문·분석·변경 이력과 점검 사진·녹음을 한 파일에 보관합니다. 암호화되지 않은 백업이므로 보관 위치를 직접 선택해 주세요. 기기나 USB에 파일을 저장할 수 있습니다.',
                 ),
-              Wrap(
-                spacing: 12,
-                crossAxisAlignment: WrapCrossAlignment.center,
-                children: [
-                  Text('총 ${rows.length}건 · ${operationPage + 1}/$pages 페이지'),
-                  TextButton(
-                    key: const ValueKey('operations-previous'),
-                    onPressed: busy || operationPage == 0
-                        ? null
-                        : () => setState(() => operationPage--),
-                    child: const Text('이전'),
-                  ),
-                  TextButton(
-                    key: const ValueKey('operations-next'),
-                    onPressed: busy || operationPage + 1 >= pages
-                        ? null
-                        : () => setState(() => operationPage++),
-                    child: const Text('다음'),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 16),
-        ChangeHistory(
-          key: ValueKey('changes-$vehicleId'),
-          store: s,
-          vehicleId: vehicleId!,
-        ),
-        TextButton.icon(
-          key: const ValueKey('open-runtime-settings'),
-          icon: const Icon(Icons.memory),
-          label: const Text('분석 기능·자료 관리'),
-          onPressed: () => showDialog<void>(
-            context: context,
-            builder: (c) => AlertDialog(
-              content: const SizedBox(
-                width: 600,
-                child: SingleChildScrollView(child: RuntimeSettingsPanel()),
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(c),
-                  child: const Text('닫기'),
+                const SizedBox(height: 16),
+                Wrap(
+                  spacing: 12,
+                  runSpacing: 12,
+                  children: [
+                    FilledButton.icon(
+                      key: const ValueKey('export-backup'),
+                      onPressed: busy ? null : export,
+                      icon: const Icon(Icons.save_alt),
+                      label: const Text('백업 파일 저장'),
+                    ),
+                    OutlinedButton.icon(
+                      key: const ValueKey('import-backup'),
+                      onPressed: busy ? null : restore,
+                      icon: const Icon(Icons.restore),
+                      label: const Text('백업 파일 복원'),
+                    ),
+                    OutlinedButton.icon(
+                      key: const ValueKey('import-knowledge'),
+                      onPressed: busy
+                          ? null
+                          : () => run(
+                              () => importKnowledgeFile(
+                                context,
+                                ref.read(storeProvider),
+                              ),
+                            ),
+                      icon: const Icon(Icons.library_add),
+                      label: const Text('정비 자료 반입'),
+                    ),
+                  ],
                 ),
               ],
             ),
           ),
-        ),
+        const SizedBox(height: 16),
+        if (!widget.operationsOnly &&
+            s.supportLibrary.knowledge.concepts.isNotEmpty) ...[
+          KnowledgePanel(store: s),
+          const SizedBox(height: 16),
+        ],
+        if (vehicleId == null)
+          const Text('등록된 차량이 없습니다.')
+        else
+          Panel(
+            title: '운용 기록 관리',
+            subtitle: '전체 기간의 운용 기록 · 정비 수정·삭제는 정비 기록 상세에서 가능합니다.',
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                DataScopeNotice([s.vehicle(vehicleId!)]),
+                const SizedBox(height: 12),
+                DropdownButtonFormField<String>(
+                  key: ValueKey('manage-$vehicleId'),
+                  initialValue: vehicleId,
+                  items: vehicles
+                      .map(
+                        (v) => DropdownMenuItem(value: v.id, child: Text(v.id)),
+                      )
+                      .toList(),
+                  onChanged: busy
+                      ? null
+                      : (v) => setState(() {
+                          vehicleId = v;
+                          operationPage = 0;
+                        }),
+                ),
+                const SizedBox(height: 12),
+                if (rows.isEmpty)
+                  const Text('운용 기록이 없습니다.')
+                else
+                  SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: DataTable(
+                      columns: [
+                        for (final label in [
+                          '기록 시각',
+                          '거리(km)',
+                          '시간(H)',
+                          '유류(L)',
+                          '관리',
+                        ])
+                          DataColumn(label: Text(label)),
+                      ],
+                      rows: rows
+                          .skip(operationPage * 12)
+                          .take(12)
+                          .map(
+                            (r) => DataRow(
+                              cells: [
+                                DataCell(Text(r['created'] as String)),
+                                DataCell(Text(number(r['distance'] as num))),
+                                DataCell(Text(number(r['hours'] as num))),
+                                DataCell(Text(number(r['fuel'] as num))),
+                                DataCell(
+                                  Row(
+                                    children: [
+                                      IconButton(
+                                        key: ValueKey('edit-op-${r['id']}'),
+                                        tooltip: '수정',
+                                        onPressed: busy
+                                            ? null
+                                            : () => editOperation(r),
+                                        icon: const Icon(Icons.edit_outlined),
+                                      ),
+                                      IconButton(
+                                        key: ValueKey('delete-op-${r['id']}'),
+                                        tooltip: '삭제',
+                                        onPressed: busy
+                                            ? null
+                                            : () => deleteOperation(r),
+                                        icon: const Icon(Icons.delete_outline),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          )
+                          .toList(),
+                    ),
+                  ),
+                Wrap(
+                  spacing: 12,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    Text('총 ${rows.length}건 · ${operationPage + 1}/$pages 페이지'),
+                    TextButton(
+                      key: const ValueKey('operations-previous'),
+                      onPressed: busy || operationPage == 0
+                          ? null
+                          : () => setState(() => operationPage--),
+                      child: const Text('이전'),
+                    ),
+                    TextButton(
+                      key: const ValueKey('operations-next'),
+                      onPressed: busy || operationPage + 1 >= pages
+                          ? null
+                          : () => setState(() => operationPage++),
+                      child: const Text('다음'),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        const SizedBox(height: 16),
+        if (vehicleId != null)
+          ChangeHistory(
+            key: ValueKey('changes-$vehicleId'),
+            store: s,
+            vehicleId: vehicleId!,
+          ),
+        if (!widget.operationsOnly)
+          TextButton.icon(
+            key: const ValueKey('open-runtime-settings'),
+            icon: const Icon(Icons.memory),
+            label: const Text('분석 기능·자료 관리'),
+            onPressed: () => showDialog<void>(
+              context: context,
+              builder: (c) => AlertDialog(
+                content: const SizedBox(
+                  width: 600,
+                  child: SingleChildScrollView(child: RuntimeSettingsPanel()),
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(c),
+                    child: const Text('닫기'),
+                  ),
+                ],
+              ),
+            ),
+          ),
       ],
     );
   }

@@ -21,6 +21,7 @@ import 'ui/data_tools.dart';
 import 'ui/manual_search.dart';
 import 'ui/chat.dart';
 import 'ui/setup.dart';
+import 'ui/field_work.dart';
 import 'rag_device_probe.dart';
 import 'optional_model_device_probe.dart';
 import 'vision_device_probe.dart';
@@ -93,28 +94,64 @@ void main() {
   runApp(const ProviderScope(child: MilitaryApp()));
 }
 
+Future<void> _finishOnboarding(
+  BuildContext context,
+  AppStore store,
+  OnboardingAction action,
+) async {
+  switch (action) {
+    case OnboardingAction.examples:
+      if (store.presentationVehicles.isEmpty) {
+        await store.loadPresentationFleet();
+      } else if (!store.dashboardExampleView) {
+        await store.setDashboardExampleView(true);
+      }
+    case OnboardingAction.register:
+      if (store.dashboardExampleView) {
+        await store.setDashboardExampleView(false);
+      }
+    case OnboardingAction.home:
+      break;
+  }
+  await store.completeOnboarding();
+  if (context.mounted) {
+    context.go(switch (action) {
+      OnboardingAction.examples => ExampleGuide.location(0, ''),
+      OnboardingAction.register => '/setup',
+      OnboardingAction.home => '/',
+    });
+  }
+}
+
 final appRouter = GoRouter(
   initialLocation: '/',
   routes: [
     GoRoute(
       path: '/welcome',
       builder: (context, state) => OnboardingScreen(
-        onComplete: () async {
-          await ProviderScope.containerOf(context)
-              .read(storeProvider)
-              .completeOnboarding();
-          if (context.mounted) context.go('/');
-        },
+        onComplete: (action) => _finishOnboarding(
+          context,
+          ProviderScope.containerOf(context).read(storeProvider),
+          action,
+        ),
       ),
     ),
     ShellRoute(
-      builder: (context, state, child) =>
-          AppShell(location: state.uri.path, child: child),
+      builder: (context, state, child) => AppShell(
+        location: state.uri.path,
+        guideStep: ExampleGuide.stepFor(state.uri),
+        child: child,
+      ),
       routes: [
+        GoRoute(
+          path: '/field-work',
+          builder: (context, state) => const FieldWorkScreen(),
+        ),
         GoRoute(
           path: '/',
           builder: (context, state) => const DashboardScreen(),
         ),
+        GoRoute(path: '/more', builder: (context, state) => const MoreScreen()),
         GoRoute(
           path: '/vehicles',
           builder: (context, state) => const VehiclesScreen(),
@@ -132,7 +169,10 @@ final appRouter = GoRouter(
         ),
         GoRoute(
           path: '/records',
-          builder: (context, state) => const RecordsScreen(),
+          builder: (context, state) => RecordsScreen(
+            key: ValueKey(state.uri.toString()),
+            thisMonth: state.uri.queryParameters['period'] == 'month',
+          ),
           routes: [
             GoRoute(
               path: ':id',
@@ -170,6 +210,11 @@ final appRouter = GoRouter(
                   state.uri.queryParameters['type'] != 'operation',
             );
           },
+        ),
+        GoRoute(
+          path: '/operations',
+          builder: (context, state) =>
+              const DataToolsScreen(operationsOnly: true),
         ),
         GoRoute(
           path: '/data-tools',
@@ -260,19 +305,22 @@ class MilitaryApp extends StatelessWidget {
   const MilitaryApp({super.key});
   @override
   Widget build(BuildContext context) => MaterialApp.router(
-    title: '정비온',
+    title: '00 수송부',
     debugShowCheckedModeBanner: false,
     locale: const Locale('ko'),
     supportedLocales: const [Locale('ko')],
     localizationsDelegates: GlobalMaterialLocalizations.delegates,
     theme: ThemeData(
       useMaterial3: true,
-      fontFamily: 'NotoSansKR',
+      fontFamily: 'Pretendard',
       scaffoldBackgroundColor: surface,
       colorScheme: ColorScheme.fromSeed(
-        seedColor: green,
+        seedColor: brandFill,
         primary: green,
+        primaryContainer: brandTint,
+        onPrimaryContainer: green,
         surface: Colors.white,
+        onSurface: ink,
       ),
       dividerColor: line,
       inputDecorationTheme: InputDecorationTheme(
@@ -294,9 +342,11 @@ class MilitaryApp extends StatelessWidget {
       filledButtonTheme: FilledButtonThemeData(
         style: FilledButton.styleFrom(
           minimumSize: const Size(48, 48),
+          backgroundColor: brandFill,
+          foregroundColor: ink,
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
           textStyle: const TextStyle(
-            fontFamily: 'NotoSansKR',
+            fontFamily: 'Pretendard',
             fontWeight: FontWeight.w700,
           ),
         ),
@@ -315,7 +365,14 @@ class MilitaryApp extends StatelessWidget {
 }
 
 class AppShell extends ConsumerStatefulWidget {
-  const AppShell({required this.location, required this.child, super.key});
+  const AppShell({
+    required this.location,
+    required this.child,
+    this.guideStep,
+    super.key,
+  });
+
+  final int? guideStep;
   final String location;
   final Widget child;
   @override
@@ -365,7 +422,9 @@ class _AppShellState extends ConsumerState<AppShell>
     final store = ref.watch(storeProvider);
     final runtime = ref.watch(adaptiveRuntimeProvider);
     if (store.ready && !store.onboardingCompleted) {
-      return OnboardingScreen(onComplete: store.completeOnboarding);
+      return OnboardingScreen(
+        onComplete: (action) => _finishOnboarding(context, store, action),
+      );
     }
     return LayoutBuilder(
       builder: (context, c) {
@@ -378,7 +437,7 @@ class _AppShellState extends ConsumerState<AppShell>
               SafeArea(
                 child: Row(
                   children: [
-                    if (wide) SizedBox(width: 216, child: _sidebar()),
+                    if (wide) SizedBox(width: 180, child: _sidebar()),
                     Expanded(
                       child: Column(
                         children: [
@@ -408,7 +467,7 @@ class _AppShellState extends ConsumerState<AppShell>
                                         CrossAxisAlignment.start,
                                     children: [
                                       Text(
-                                        '정비온',
+                                        '00 수송부',
                                         style: TextStyle(
                                           fontSize: 16,
                                           fontWeight: FontWeight.w800,
@@ -427,7 +486,9 @@ class _AppShellState extends ConsumerState<AppShell>
                                   ),
                                 ),
                                 if (compact &&
-                                    MediaQuery.textScalerOf(context).scale(12) <= 18)
+                                    MediaQuery.textScalerOf(context)
+                                            .scale(12) <=
+                                        18)
                                   Text(
                                     day(ref.watch(currentTimeProvider)),
                                     style: const TextStyle(
@@ -463,7 +524,25 @@ class _AppShellState extends ConsumerState<AppShell>
                                   )
                                 : Padding(
                                     padding: EdgeInsets.all(compact ? 24 : 14),
-                                    child: widget.child,
+                                    child: widget.guideStep == null
+                                        ? widget.child
+                                        : Column(
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.stretch,
+                                            children: [
+                                              ExampleGuide(
+                                                step: widget.guideStep!,
+                                                vehicleId:
+                                                    store
+                                                        .presentationVehicles
+                                                        .firstOrNull
+                                                        ?.id ??
+                                                    '',
+                                              ),
+                                              const SizedBox(height: 8),
+                                              Expanded(child: widget.child),
+                                            ],
+                                          ),
                                   ),
                           ),
                         ],
@@ -499,118 +578,75 @@ class _AppShellState extends ConsumerState<AppShell>
   }
 
   Widget _sidebar() {
-    final items = [
-      ('종합 현황', '/', '바로 하기'),
-      ('사진 점검', '/vision', '바로 하기'),
-      ('기록 입력', '/entry', '바로 하기'),
-      ('정비 질문', '/chat', '바로 하기'),
-      ('차량 목록', '/vehicles', '차량과 기록'),
-      ('정비 기록', '/records', '차량과 기록'),
-      ('연간 정비계획', '/plans', '차량과 기록'),
-      ('정비 분석', '/analysis', '차량과 기록'),
-      ('지난 분석 결과', '/ai-history', '차량과 기록'),
-      ('부품별 정비', '/support', '도구와 설정'),
-      if (ref.watch(adaptiveRuntimeProvider).modelInfo['corpusDatabasePath']
-          is String)
-        ('책자 검색', '/manual-search', '도구와 설정'),
-      ('차량 등록·설정', '/setup', '도구와 설정'),
-      ('백업·자료 가져오기', '/data-tools', '도구와 설정'),
+    const items = [
+      ('홈', '/', Icons.home_outlined),
+      ('사진 점검', '/front-map', Icons.photo_camera_outlined),
+      ('기록', '/records', Icons.assignment_outlined),
+      ('정비 질문', '/chat', Icons.chat_bubble_outline),
+      ('더 보기', '/more', Icons.grid_view_outlined),
     ];
-    return Container(
-      color: ink,
-      child: Column(
-        children: [
-          const SizedBox(height: 16),
-          const DesignIcon('1:135', 'img', size: 48),
-          const SizedBox(height: 8),
-          const Padding(
-            padding: EdgeInsets.symmetric(horizontal: 16),
-            child: Text(
-              '정비참모부 관리단',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 14,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ),
-          const SizedBox(height: 8),
-          Expanded(
-            child: ListView(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              children: [
-                for (var i = 0; i < items.length; i++) ...[
-                  if (i == 0 || items[i].$3 != items[i - 1].$3)
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(14, 18, 8, 10),
-                      child: Text(
-                        items[i].$3,
-                        style: const TextStyle(
-                          color: Color(0xFF8B95A1),
-                          fontSize: 10,
-                        ),
-                      ),
-                    ),
-                  _navigationItem(items[i].$1, items[i].$2),
-                ],
-              ],
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.all(18),
-            child: Text(
-              '정비온 v${ref.watch(adaptiveRuntimeProvider).modelInfo['appVersion'] ?? '0.9.0'}',
-              style: const TextStyle(color: Color(0xFF8B95A1), fontSize: 10),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _navigationItem(String label, String path) {
-    final location = widget.location;
-    final selected = path == '/'
-        ? location == '/'
-        : location.startsWith(path) || (path == '/vision' && location == '/front-map');
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 5),
-      child: Material(
-        color: selected ? green : Colors.transparent,
-        borderRadius: BorderRadius.circular(8),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(8),
-          onTap: () {
-            if (scaffoldKey.currentState?.isDrawerOpen ?? false) {
-              Navigator.pop(context);
-            }
-            context.go(path);
-          },
-          child: Container(
-            constraints: const BoxConstraints(minHeight: 48),
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-            child: Row(
-              children: [
-                Container(
-                  width: 3,
-                  height: 20,
-                  color: selected ? Colors.white : Colors.transparent,
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    label,
+    final selectedPath = switch (widget.location) {
+      '/' => '/',
+      '/front-map' || '/vision' => '/front-map',
+      '/records' || '/entry' || '/operations' => '/records',
+      '/chat' => '/chat',
+      _ => '/more',
+    };
+    return Material(
+      color: const Color(0xFF192A26),
+      child: SafeArea(
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(12, 20, 12, 12),
+          children: [
+            const Padding(
+              padding: EdgeInsets.fromLTRB(8, 0, 8, 16),
+              child: Column(
+                children: [
+                  DesignIcon('1:135', 'img', size: 54),
+                  SizedBox(height: 9),
+                  Text(
+                    '정비참모부 관리단',
+                    textAlign: TextAlign.center,
                     style: TextStyle(
-                      color: selected ? Colors.white : const Color(0xFFB6C0C2),
-                      fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                      color: Colors.white,
                       fontSize: 14,
+                      fontWeight: FontWeight.w800,
                     ),
                   ),
-                ),
-              ],
+                  SizedBox(height: 13),
+                  Divider(height: 1, color: Color(0xFF40544C)),
+                ],
+              ),
             ),
-          ),
+            for (final (label, path, icon) in items)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: ListTile(
+                  minTileHeight: 52,
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 12),
+                  horizontalTitleGap: 8,
+                  minLeadingWidth: 22,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  leading: Icon(
+                    icon,
+                    size: 22,
+                    color: selectedPath == path ? ink : null,
+                  ),
+                  title: Text(label, style: const TextStyle(fontSize: 14)),
+                  selected: selectedPath == path,
+                  selectedTileColor: brandAccent,
+                  selectedColor: ink,
+                  textColor: const Color(0xFFEDF4F0),
+                  iconColor: const Color(0xFFA9BEB4),
+                  onTap: () {
+                    scaffoldKey.currentState?.closeDrawer();
+                    context.go(path);
+                  },
+                ),
+              ),
+          ],
         ),
       ),
     );

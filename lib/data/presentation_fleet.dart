@@ -31,7 +31,12 @@ extension PresentationFleet on AppStore {
           "SELECT value FROM app_metadata WHERE key='presentation_fleet_v1'",
         )
         .getSingleOrNull();
-    if (exists != null) return;
+    if (exists != null) {
+      await _seedAdditionalMaintenance(
+        DateTime.parse(exists.read<String>('value')),
+      );
+      return;
+    }
     final now = clock();
     final today = DateTime(now.year, now.month, now.day);
     String date(DateTime d) => d.toIso8601String().substring(0, 10);
@@ -153,7 +158,7 @@ extension PresentationFleet on AppStore {
             intervalKm: 10000,
             baselineKm: distance - used,
             baselineDate: date(baselineDate),
-            source: '운용 예시의 점검 간격 · 실제 적용 시 지침 확인',
+            source: '체험 차량의 점검 기준',
           ),
         );
       }
@@ -176,5 +181,82 @@ extension PresentationFleet on AppStore {
         );
       }
     });
+    await _seedAdditionalMaintenance(today);
+  }
+
+  Future<void> _seedAdditionalMaintenance(DateTime anchor) async {
+    const marker = 'presentation_maintenance_v2';
+    final affected = <String>{};
+    await db!.transaction(() async {
+      final completed = await db!
+          .customSelect(
+            'SELECT value FROM app_metadata WHERE key = ?',
+            variables: [const Variable<String>(marker)],
+          )
+          .getSingleOrNull();
+      if (completed != null) return;
+
+      final vehicles = await db!
+          .customSelect(
+            "SELECT id FROM vehicles WHERE id LIKE 'MOCK-OPS-%' ORDER BY id",
+          )
+          .get();
+      const jobs = [
+        ('와이퍼', '차체', '닦임 불량으로 와이퍼 교환', 22000, true),
+        ('에어컨 필터', '공조', '송풍량 저하 확인 후 필터 교환', 38000, true),
+        ('전조등', '전장', '좌측 전조등 점등 불량 수리', 64000, false),
+        ('냉각수 호스', '냉각', '연결부 누수 확인 후 호스 교환', 96000, true),
+        ('브레이크액', '제동', '브레이크액 교환 후 페달 응답 확인', 72000, true),
+        ('도어 잠금장치', '차체', '잠금장치 연결부 점검 및 조정', 47000, false),
+        ('휠 얼라인먼트', '조향/현가', '쏠림 증상 확인 후 바퀴 정렬 조정', 78000, false),
+        ('보조 벨트', '엔진/연료', '벨트 소음 확인 후 교환', 108000, true),
+      ];
+      const monthOffsets = [0, 1, 1, 2, 2, 2, 3, 4, 4, 5, 5, 5];
+      for (final (index, vehicle) in vehicles.indexed) {
+        final vehicleId = vehicle.read<String>('id');
+        for (var visit = 0; visit < 2; visit++) {
+          final (part, system, description, cost, replaced) =
+              jobs[(index * 3 + visit) % jobs.length];
+          final offset =
+              monthOffsets[(index + visit * 5) % monthOffsets.length];
+          final day = DateTime(
+            anchor.year,
+            anchor.month - offset,
+            anchor.day,
+          ).subtract(Duration(days: 2 + (index * 3 + visit) % 18));
+          final record = Maintenance(
+            id: '$vehicleId-MT-EXTRA-$visit',
+            vehicleId: vehicleId,
+            date: day.toIso8601String().substring(0, 10),
+            part: part,
+            system: system,
+            description: description,
+            cost: cost + index * 1000,
+            maintenanceType: replaced ? '예방정비' : '고장수리',
+            replacementCompleted: replaced,
+          );
+          await db!.customStatement(
+            'INSERT OR IGNORE INTO maintenance (id,vehicle_id,payload) VALUES (?,?,?)',
+            [
+              record.id,
+              vehicleId,
+              jsonEncode({
+                ...record.toJson(),
+                'isSynthetic': true,
+                'source': 'presentation-fleet-v2',
+              }),
+            ],
+          );
+          affected.add(vehicleId);
+        }
+      }
+      await db!.customStatement(
+        'INSERT INTO app_metadata (key,value) VALUES (?,?)',
+        [marker, 'done'],
+      );
+    });
+    for (final id in affected) {
+      _dirtyVehicles[id] = '체험 기록 추가';
+    }
   }
 }

@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../data/store.dart';
+import '../data/adaptive_runtime.dart';
 import 'components.dart';
 import 'support.dart';
 
@@ -24,6 +25,9 @@ class _SetupState extends ConsumerState<SetupScreen> {
   @override
   Widget build(BuildContext context) {
     final s = ref.watch(storeProvider);
+    final appVersion = ref
+        .watch(adaptiveRuntimeProvider)
+        .modelInfo['appVersion'];
     if (selected != null &&
         !s.registeredVehicles.any((v) => v.id == selected)) {
       selected = null;
@@ -39,14 +43,65 @@ class _SetupState extends ConsumerState<SetupScreen> {
     return ListView(
       children: [
         const PageTitle('초기 설정', '차량 등록 → 근거 준비 → 정비 주기 확인 → 점검·정비 기록'),
-        Align(
-          alignment: Alignment.centerLeft,
-          child: TextButton.icon(
-            onPressed: () => context.push('/welcome'),
-            icon: const Icon(Icons.help_outline),
-            label: const Text('정비온 사용 안내'),
+        Panel(
+          title: '앱 소개',
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                children: [
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(12),
+                    child: Image.asset(
+                      'assets/branding/jungbion-vehicle-logo.png',
+                      width: 64,
+                      height: 64,
+                      cacheWidth: 192,
+                      excludeFromSemantics: true,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  const Expanded(
+                    child: Text(
+                      '정비온',
+                      style: TextStyle(
+                        fontSize: 22,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              const Text(
+                '차량 점검과 정비 기록을 한곳에서 관리합니다. '
+                '저장한 책자를 찾아보고, 다음 점검과 일정을 확인할 수 있어요.',
+              ),
+              const SizedBox(height: 12),
+              const Divider(height: 1),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.help_outline, color: green),
+                title: const Text('정비온 사용 안내'),
+                subtitle: const Text('사진 점검부터 일정과 책자 검색까지 따라가기'),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => context.push('/welcome'),
+              ),
+              const Divider(height: 1),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.info_outline, color: green),
+                title: const Text('앱 버전'),
+                subtitle: Text(
+                  appVersion is String && appVersion.isNotEmpty
+                      ? appVersion
+                      : '버전 정보를 확인하고 있어요.',
+                ),
+              ),
+            ],
           ),
         ),
+        const SizedBox(height: 16),
         Panel(
           title: '준비 상태',
           child: Column(
