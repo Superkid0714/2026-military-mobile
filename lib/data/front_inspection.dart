@@ -103,10 +103,19 @@ class FrontObservation {
 }
 
 class FrontPartProposal {
-  const FrontPartProposal(this.left, this.top, this.right, this.bottom);
+  const FrontPartProposal(
+    this.left,
+    this.top,
+    this.right,
+    this.bottom, {
+    this.score,
+  });
 
   static const modelId = 'rexton-front-parts-v2';
   final double left, top, right, bottom;
+  final double? score;
+  String get scoreLabel =>
+      score == null ? '점수 없음' : '인식 점수 ${(score! * 100).toStringAsFixed(1)}%';
 
   double get x => (left + right) / 2;
   double get y => (top + bottom) / 2;
@@ -125,7 +134,9 @@ class FrontPartProposal {
           .where((p) => p.name == row['part'])
           .firstOrNull;
       final box = row['box'];
-      if (part == null ||
+      final score = row['score'];
+      if ((score != null && !FrontObservation._coordinate(score)) ||
+          part == null ||
           proposals.containsKey(part) ||
           box is! List ||
           box.length != 4 ||
@@ -139,7 +150,13 @@ class FrontPartProposal {
       if (left >= right || top >= bottom) {
         throw const FormatException('잘못된 부위 위치입니다.');
       }
-      proposals[part] = FrontPartProposal(left, top, right, bottom);
+      proposals[part] = FrontPartProposal(
+        left,
+        top,
+        right,
+        bottom,
+        score: (score as num?)?.toDouble(),
+      );
     }
     return Map.unmodifiable(proposals);
   }

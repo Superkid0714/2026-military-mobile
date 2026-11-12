@@ -8,6 +8,7 @@ import 'dart:io';
 const appPackage = 'com.superkid.military.military_maintenance';
 const allowedPermissions = {
   'android.permission.CAMERA',
+  'android.permission.RECORD_AUDIO',
   '$appPackage.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION',
 };
 

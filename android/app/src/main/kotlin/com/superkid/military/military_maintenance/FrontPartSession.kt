@@ -49,6 +49,7 @@ internal class FrontPartSession(private val context: Context, threads: Int) : Na
                     val (x, y, width, height) = box
                     proposals.put(JSONObject()
                         .put("part", PARTS[i])
+                        .put("score", score.toDouble())
                         .put("box", JSONArray(listOf(
                             (x - width / 2).coerceAtLeast(0f),
                             (y - height / 2).coerceAtLeast(0f),

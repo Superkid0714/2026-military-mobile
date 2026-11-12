@@ -9,6 +9,8 @@ import java.io.File
 import java.util.concurrent.Executors
 
 class MainActivity : FlutterActivity() {
+    private val speechInput by lazy { OfflineSpeechInput(this) }
+    private val inspectionAudio by lazy { InspectionAudio(this) }
     private var modelRuntime: ModelRuntimeBridge? = null
     private var pending: MethodChannel.Result? = null
     private var exportFile: File? = null
@@ -19,6 +21,19 @@ class MainActivity : FlutterActivity() {
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         modelRuntime = ModelRuntimeBridge(this)
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "maintenance/inspection_audio")
+            .setMethodCallHandler(inspectionAudio::handle)
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "maintenance/offline_speech")
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "listen" -> speechInput.start(result)
+                    "cancel" -> {
+                        speechInput.cancel()
+                        result.success(null)
+                    }
+                    else -> result.notImplemented()
+                }
+            }
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "maintenance/model_runtime")
             .setMethodCallHandler { call, result -> modelRuntime!!.handle(call, result) }
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "maintenance/local_files")
@@ -67,7 +82,25 @@ class MainActivity : FlutterActivity() {
             }
     }
 
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == InspectionAudio.REQUEST) {
+            inspectionAudio.onPermission(grantResults.firstOrNull() == android.content.pm.PackageManager.PERMISSION_GRANTED)
+        }
+        if (requestCode == OfflineSpeechInput.REQUEST) {
+            speechInput.onPermission(grantResults.firstOrNull() == android.content.pm.PackageManager.PERMISSION_GRANTED)
+        }
+    }
+
+    override fun onStop() {
+        inspectionAudio.close()
+        speechInput.cancel()
+        super.onStop()
+    }
+
     override fun onDestroy() {
+        inspectionAudio.close()
+        speechInput.cancel()
         modelRuntime?.dispose()
         modelRuntime = null
         super.onDestroy()

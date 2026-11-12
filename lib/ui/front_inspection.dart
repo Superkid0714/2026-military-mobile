@@ -8,7 +8,10 @@ import '../data/front_inspection.dart';
 import '../data/store.dart';
 import '../data/local_vision.dart';
 import 'components.dart';
+import 'inspection_display.dart';
+import 'inspection_audio.dart';
 import 'support.dart';
+import 'field_work.dart';
 
 String frontMapUrl([
   String? vehicle,
@@ -218,12 +221,7 @@ class _FrontMapState extends ConsumerState<FrontMapScreen> {
             .where((i) => i.vehicleId == vehicle.id && i.front.isNotEmpty)
             .toList()
           ..sort((a, b) => b.created.compareTo(a.created));
-    final latest = <FrontPart, FrontObservation>{};
-    for (final session in sessions) {
-      for (final entry in session.front.entries) {
-        latest.putIfAbsent(entry.key, () => entry.value);
-      }
-    }
+    final latest = latestInspectionParts(sessions);
     final history = sessions.where((i) => i.front.containsKey(part)).toList();
 
     Widget partButton(FrontPart target) {
@@ -231,7 +229,11 @@ class _FrontMapState extends ConsumerState<FrontMapScreen> {
       final selected = part == target;
       return Semantics(
         selected: selected,
-        child: OutlinedButton(
+        child: OutlinedButton.icon(
+          icon: Text(
+            '${target.number}',
+            style: const TextStyle(fontWeight: FontWeight.w800),
+          ),
           style: OutlinedButton.styleFrom(
             minimumSize: const Size(0, 48),
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -241,7 +243,7 @@ class _FrontMapState extends ConsumerState<FrontMapScreen> {
                 : Colors.white,
           ),
           onPressed: () => setState(() => part = target),
-          child: Text(
+          label: Text(
             '${target.label}\n${status?.label ?? '미점검'}',
             textAlign: TextAlign.center,
           ),
@@ -300,6 +302,7 @@ class _FrontMapState extends ConsumerState<FrontMapScreen> {
                         'vehicle': vehicle.id,
                         'front': '1',
                         'area': area.name,
+                        'part': part.name,
                       },
                     ).toString(),
                   ),
@@ -315,40 +318,21 @@ class _FrontMapState extends ConsumerState<FrontMapScreen> {
               if (area == FrontInspectionArea.exterior)
                 const Text('좌우는 운전석에서 앞을 볼 때 기준입니다.'),
               const SizedBox(height: 8),
-              if (area == FrontInspectionArea.engineBay)
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [for (final item in area.parts) partButton(item)],
-                )
-              else
-                Center(
-                  child: Container(
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      color: Theme.of(context).colorScheme.surfaceContainerLow,
-                      border: Border.all(color: line),
-                      borderRadius: BorderRadius.circular(32),
-                    ),
-                    child: Column(
-                      children: [
-                        const Icon(Icons.directions_car_outlined, size: 36),
-                        partButton(FrontPart.hood),
-                        Wrap(
-                          alignment: WrapAlignment.center,
-                          spacing: 8,
-                          runSpacing: 8,
-                          children: [
-                            partButton(FrontPart.rightLamp),
-                            partButton(FrontPart.grille),
-                            partButton(FrontPart.leftLamp),
-                          ],
-                        ),
-                        partButton(FrontPart.bumper),
-                      ],
-                    ),
+              ResponsiveColumns(
+                breakpoint: 690,
+                children: [
+                  InspectionDiagram(
+                    area: area,
+                    observations: latest,
+                    selected: part,
                   ),
-                ),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [for (final item in area.parts) partButton(item)],
+                  ),
+                ],
+              ),
               const SizedBox(height: 16),
               Text(
                 part.label,
@@ -372,6 +356,25 @@ class _FrontMapState extends ConsumerState<FrontMapScreen> {
                     onPressed: () =>
                         context.push(supportUrl(vehicle.id, part.searchTerm)),
                     child: const Text('수리 기록'),
+                  ),
+                  OutlinedButton(
+                    onPressed: () => showFieldWorkEditor(
+                      context,
+                      store,
+                      vehicleId: vehicle.id,
+                      part: part.label,
+                    ),
+                    child: const Text('부속 요청'),
+                  ),
+                  TextButton(
+                    onPressed: () => showFieldWorkEditor(
+                      context,
+                      store,
+                      kind: FieldWorkKind.feedback,
+                      vehicleId: vehicle.id,
+                      part: part.label,
+                    ),
+                    child: const Text('인식 오류 제보'),
                   ),
                 ],
               ),
@@ -406,6 +409,8 @@ class _FrontMapState extends ConsumerState<FrontMapScreen> {
                             observations: {part: inspection.front[part]!},
                           ),
                           if (inspection.note.isNotEmpty) Text(inspection.note),
+                          if (inspection.audioPath case final path?)
+                            InspectionAudioPlayback(path, key: ValueKey(path)),
                           TextButton(
                             onPressed: () => context.push(
                               Uri(
