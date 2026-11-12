@@ -51,6 +51,11 @@ class ManualUiInstrumentation : Instrumentation() {
         bitmap.recycle()
     }
     private fun navigate(text:String) {
+        if (text in listOf("차량 등록·설정", "책자 검색", "정비 분석") && find(text, true) == null) {
+            navigate("더 보기")
+            click(waitFor(text))
+            return
+        }
         if(find(text,true)==null) {
             find("메뉴 열기",true)?.let {click(it);Thread.sleep(300)}
         }
@@ -73,7 +78,7 @@ class ManualUiInstrumentation : Instrumentation() {
     }
     private fun dashboard(report:MutableMap<String,Any>) {
         waitFor("종합 현황",60)
-        waitFor("운용 예시 12대")
+        waitFor("운용 차량 12대")
         waitFor("차량 사진 점검")
         waitFor("정비 결과 입력")
         waitFor("정비 질문하기")
@@ -81,7 +86,7 @@ class ManualUiInstrumentation : Instrumentation() {
         saveScreen("manual-ui-source.png")
         val db=android.database.sqlite.SQLiteDatabase.openDatabase(File(targetContext.applicationInfo.dataDir,"app_flutter/military.sqlite").path,null,android.database.sqlite.SQLiteDatabase.OPEN_READONLY)
         try {
-            for((table,expected) in listOf("vehicles" to 12,"operations" to 84,"maintenance" to 92)) {
+            for((table,expected) in listOf("vehicles" to 12,"operations" to 84,"maintenance" to 116)) {
                 val key=if(table=="vehicles") "id" else "vehicle_id"
                 val count=db.rawQuery("SELECT count(*) FROM $table WHERE $key LIKE 'MOCK-OPS-%'",null).use {it.moveToFirst();it.getInt(0)}
                 check(count>=expected) {"presentation_count_$table:$count"}
@@ -93,25 +98,42 @@ class ManualUiInstrumentation : Instrumentation() {
     }
     private fun onboarding(report:MutableMap<String,Any>) {
         Thread.sleep(1200)
-        val firstLaunch=find("정비온과 함께 시작해요")!=null
-        if(!firstLaunch) {
-            waitFor("종합 현황",60)
+        val greeting = "어서 오세요!"
+        val firstLaunch = find(greeting) != null
+        if (!firstLaunch) {
+            waitFor("종합 현황", 60)
             navigate("차량 등록·설정")
             click(waitFor("정비온 사용 안내"))
         }
-        report["guideEntry"]=if(firstLaunch) "first_launch" else "replay"
-        waitFor("정비온과 함께 시작해요",60)
+        report["guideEntry"] = if (firstLaunch) "first_launch" else "replay"
+        waitFor(greeting, 60)
         saveScreen("manual-ui-source.png")
-        report["firstLaunchGuideVisible"]=firstLaunch
-        click(waitFor("다음"));waitFor("통신이 없어도 든든하게")
-        click(waitFor("다음"));waitFor("기록하고, 다음 점검까지")
-        click(waitFor("정비온 시작하기"));waitFor("종합 현황")
-        report["threeStepsCompleted"]=true
+        report["firstLaunchGuideVisible"] = firstLaunch
+        click(waitFor("사용 안내 시작"))
+        waitFor("다음 점검")
+        report["exampleDashboardOpened"] = true
+        for (title in listOf(
+            "사진으로 상태 남기기", "정비 결과 기록하기", "정비 질문하기",
+            "필요한 기능 찾기", "차량별 상태 보기", "달력으로 일정 보기",
+            "정비 흐름 살펴보기", "책자에서 찾기", "내 차량 준비하기", "기록 보관하기"
+        )) {
+            click(waitFor("다음"))
+            waitFor(title)
+        }
+        click(waitFor("안내 마치기"))
+        waitFor("종합 현황")
+        report["exampleGuideCompleted"] = true
         navigate("차량 등록·설정")
-        click(waitFor("정비온 사용 안내"));waitFor("정비온과 함께 시작해요")
-        report["replayOpened"]=true
-        click(waitFor("건너뛰기"));waitFor("종합 현황")
-        report["skipReturnsToApp"]=true
+        click(waitFor("정비온 사용 안내"))
+        click(waitFor("내 차량 등록하기"))
+        waitFor("내 차량 등록")
+        report["registrationOpened"] = true
+        click(waitFor("정비온 사용 안내"))
+        waitFor(greeting)
+        report["replayOpened"] = true
+        click(waitFor("건너뛰기"))
+        waitFor("종합 현황")
+        report["skipReturnsToApp"] = true
     }
     private fun books(report:MutableMap<String,Any>) {
         waitFor("종합 현황")
@@ -158,8 +180,8 @@ class ManualUiInstrumentation : Instrumentation() {
         val formatted=java.text.NumberFormat.getIntegerInstance(java.util.Locale.US).format(cost)+"원"
         check(find("${records.size}건")!=null && find(formatted)!=null) {"analysis_totals_mismatch"}
         report["analysisTotalsMatch"]=true;report["maintenanceCount"]=records.size;report["maintenanceCost"]=cost
-        repeat(6) {if(find("월별 정비 건수 추이")==null) bodyScroll()}
-        check(find("장치 종류별 정비 현황")!=null && find("월별 정비 건수 추이")!=null) {"chart_sections_missing"}
+        repeat(6) {if(find("월별 정비 건수")==null) bodyScroll()}
+        check(find("정비 종류별 건수")!=null && find("월별 정비 건수")!=null) {"chart_sections_missing"}
         if(records.isNotEmpty()) {
             val months=records.map {it.getString("date").substring(0,7)}.toSet()
             val seen=mutableSetOf<String>()
@@ -185,7 +207,7 @@ class ManualUiInstrumentation : Instrumentation() {
         report["scope"]="ordinary_app_ui_questions_saved_only"
         waitFor("종합 현황")
         navigate("정비 질문")
-        waitFor("질문 예시")
+        waitFor("추천 질문")
         report["questionExamplesVisible"]=true
         click(waitFor("질문할 차량"))
         Thread.sleep(300)

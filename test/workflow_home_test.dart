@@ -7,13 +7,57 @@ import 'package:military_maintenance/ui/components.dart';
 import 'ui_usability_test.dart' show setup, tap;
 
 void main() {
+  testWidgets('홈에서 조회 기간을 바꾸고 월별 정비와 운행 기록으로 이동한다', (tester) async {
+    await setup(tester);
+    await tap(tester, find.text('3개월'));
+    expect(find.text('최근 3개월 정비'), findsOneWidget);
+    await tap(tester, find.text('12개월'));
+    expect(find.text('최근 12개월 정비'), findsOneWidget);
+    tester
+        .stateList<ScrollableState>(find.byType(Scrollable))
+        .where((state) => state.position.axis == Axis.vertical)
+        .last
+        .position
+        .jumpTo(0);
+    await tester.pumpAndSettle();
+    await tap(tester, find.text('이번 달 정비와 점검 순서'));
+    expect(find.text('우선 점검'), findsOneWidget);
+    await tap(tester, find.text('운행 기록'));
+    expect(find.text('운행 기록'), findsOneWidget);
+    expect(find.text('운용 기록 관리'), findsOneWidget);
+  });
+
+  testWidgets('다섯 메뉴에서 기록 쓰기와 추가 화면으로 이동한다', (tester) async {
+    await setup(tester);
+    expect(find.text('정비참모부 관리단'), findsOneWidget);
+    for (final label in ['홈', '사진 점검', '기록', '정비 질문', '더 보기']) {
+      expect(find.widgetWithText(ListTile, label), findsOneWidget);
+    }
+    expect(find.widgetWithText(ListTile, '차량 목록'), findsNothing);
+    await tap(tester, find.widgetWithText(ListTile, '기록'));
+    await tap(tester, find.text('기록 쓰기'));
+    expect(appRouter.routeInformationProvider.value.uri.path, '/entry');
+
+    await tap(tester, find.widgetWithText(ListTile, '더 보기'));
+    await tap(tester, find.widgetWithText(ListTile, '정비 분석'));
+    await tap(tester, find.text('지난 분석 결과'));
+    expect(appRouter.routeInformationProvider.value.uri.path, '/ai-history');
+
+    await tap(tester, find.widgetWithText(ListTile, '더 보기'));
+    await tester.tap(find.widgetWithText(ListTile, '책자 검색'));
+    await tester.pump();
+    expect(appRouter.routeInformationProvider.value.uri.path, '/manual-search');
+    appRouter.go('/');
+    await tester.pumpAndSettle();
+  });
+
   testWidgets('예제 시작과 합성 분석을 분리하고 준비·업무 동선을 제공한다', (tester) async {
     final s = await setup(tester);
     await tester.runAsync(s.loadPresentationFleet);
     await tester.pumpAndSettle();
-    expect(find.text('운용 예시 12대'), findsOneWidget);
+    expect(find.text('앱 제공 차량 12대'), findsOneWidget);
     expect(find.text('다음 점검'), findsOneWidget);
-    expect(find.text('정비 분석 보기'), findsOneWidget);
+    expect(find.text('관리 차량'), findsOneWidget);
     expect(find.byType(Bars), findsNothing);
     await expectLater(
       find.byType(MilitaryApp),
@@ -32,7 +76,7 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(s.dashboardVehicles, isEmpty);
-    expect(find.widgetWithText(FilledButton, '차량 등록'), findsOneWidget);
+    expect(find.widgetWithText(OutlinedButton, '차량 등록'), findsOneWidget);
   });
 
   testWidgets('실제 등록 차량의 주기 도달·기준 확인·미등록을 구분하고 작업 대상을 연결한다', (tester) async {
@@ -125,13 +169,23 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('홈에서 정비 결과 입력과 정비 질문을 바로 연다', (tester) async {
+    await setup(tester);
+    await tap(tester, find.text('정비 결과 입력'));
+    expect(appRouter.routeInformationProvider.value.uri.path, '/entry');
+    appRouter.go('/');
+    await tester.pumpAndSettle();
+    await tap(tester, find.text('정비 질문하기'));
+    expect(appRouter.routeInformationProvider.value.uri.path, '/chat');
+  });
+
   testWidgets('재구성한 홈을 600×800·글자 1.6배에서 사용할 수 있다', (tester) async {
     await setup(tester, size: const Size(600, 800));
     tester.platformDispatcher.textScaleFactorTestValue = 1.6;
     addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
-    await tap(tester, find.widgetWithText(FilledButton, '차량 사진 점검'));
+    await tap(tester, find.widgetWithText(OutlinedButton, '차량 사진 점검'));
     expect(find.text('차량 상태 지도'), findsOneWidget);
     expect(find.text('전면 사진 찍기'), findsOneWidget);
     expect(tester.takeException(), isNull);

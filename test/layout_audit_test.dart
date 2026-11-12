@@ -33,6 +33,8 @@ void main() {
     '/ai-history?vehicle=MOCK-RX-0001',
     '/entry',
     '/data-tools',
+    '/more',
+    '/field-work',
     '/setup',
     '/support?vehicle=MOCK-RX-0001',
     '/manual-search',

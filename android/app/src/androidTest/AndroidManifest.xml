@@ -12,4 +12,6 @@
         android:targetPackage="com.superkid.military.military_maintenance" />
     <instrumentation android:name="com.superkid.military.military_maintenance.AuxRuntimeDiagnosisInstrumentation"
         android:targetPackage="com.superkid.military.military_maintenance" />
+    <instrumentation android:name="com.superkid.military.military_maintenance.FieldUiInstrumentation"
+        android:targetPackage="com.superkid.military.military_maintenance" />
 </manifest>

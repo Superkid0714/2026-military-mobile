@@ -16,7 +16,10 @@ void main() {
       store.operations.where((r) => ids.contains(r['vehicleId'])).length,
       84,
     );
-    expect(store.records.where((r) => ids.contains(r.vehicleId)).length, 92);
+    expect(store.records.where((r) => ids.contains(r.vehicleId)).length, 116);
+    final added = store.records.where((r) => r.id.contains('-MT-EXTRA-'));
+    expect(added.map((r) => r.part).toSet(), hasLength(8));
+    expect(added.where((r) => r.system == '공조'), isNotEmpty);
     expect(
       store.supportLibrary.rules.where((r) => ids.contains(r.vehicleId)).length,
       12,

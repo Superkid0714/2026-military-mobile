@@ -85,7 +85,7 @@ void main() {
     await tester.runAsync(() => s.registerVehicle(registered));
     appRouter.go('/vehicles');
     await tester.pumpAndSettle();
-    await tap(tester, find.text('분석용 차량 함께 보기'));
+    await tap(tester, find.text('전체 차량 함께 보기'));
     expect(find.textContaining('등록 차량 1대 · 분석용 차량 100대 혼합'), findsOneWidget);
     appRouter.go('/support?vehicle=SCOPE-REAL');
     await tester.pumpAndSettle();

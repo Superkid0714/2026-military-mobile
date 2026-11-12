@@ -21,6 +21,42 @@ Future<AppStore> createStore([File? file]) async {
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  test('점검 녹음은 부위와 함께 백업되고 복원 시 새 파일로 연결된다', () async {
+    final directory = await Directory.systemTemp.createTemp(
+      'inspection-audio-',
+    );
+    addTearDown(() => directory.delete(recursive: true));
+    final store = await createStore();
+    addTearDown(() => store.db!.close());
+    final image = await File('${directory.path}/photo.jpg')
+        .writeAsBytes([1, 2, 3]);
+    final bytes = [0, 0, 0, 12, ...ascii.encode('ftypM4A ')];
+    final audio = await File('${image.path}.m4a').writeAsBytes(bytes);
+    await store.saveInspection(
+      Inspection(
+        id: 'AUDIO-TEST',
+        vehicleId: store.vehicles.first.id,
+        area: '엔진룸',
+        mode: '점검',
+        created: '2026-10-09T12:00:00',
+        imagePath: image.path,
+        note: '',
+        audioPath: audio.path,
+        audioPart: '배터리',
+      ),
+    );
+    final backup = File('${directory.path}/audio.mbackup');
+    await store.exportBackup(backup);
+    final snapshot = await BackupSnapshot.read(backup);
+    expect(snapshot.audio['AUDIO-TEST'], bytes);
+    await store.restoreBackup(snapshot, directory);
+    final restored = store.inspections.single;
+    expect(restored.audioPart, '배터리');
+    expect(restored.audioPath, '${restored.imagePath}.m4a');
+    expect(restored.audioPath, isNot(audio.path));
+    expect(await File(restored.audioPath!).readAsBytes(), bytes);
+  });
+
   test('변경 이력은 같은 시각의 수정도 최신순으로 전체 페이지를 조회한다', () async {
     final s = await createStore();
     addTearDown(() => s.db!.close());
@@ -239,7 +275,11 @@ void main() {
         imagePath: photo.path,
         note: '가상 메모',
         front: const {
-          FrontPart.leftLamp: FrontObservation(FrontCheck.review, x: .78, y: .42),
+          FrontPart.leftLamp: FrontObservation(
+            FrontCheck.review,
+            x: .78,
+            y: .42,
+          ),
           FrontPart.bumper: FrontObservation(FrontCheck.hidden),
         },
       ),
@@ -275,8 +315,10 @@ void main() {
     await s.db!.close();
     final reopened = await createStore(db);
     expect(reopened.records.length, count);
-    expect(reopened.inspections.single.front[FrontPart.leftLamp]?.status,
-        FrontCheck.review);
+    expect(
+      reopened.inspections.single.front[FrontPart.leftLamp]?.status,
+      FrontCheck.review,
+    );
     expect(reopened.vehicle(vid).distance, old.distance + 1500);
     expect(
       await File(reopened.inspections.single.imagePath).readAsBytes(),

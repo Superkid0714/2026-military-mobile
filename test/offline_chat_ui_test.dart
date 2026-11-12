@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:military_maintenance/data/store.dart';
@@ -28,7 +29,7 @@ Future<AppStore> mountChat(
       ],
       child: MaterialApp(
         theme: ThemeData(
-          fontFamily: 'NotoSansKR',
+          fontFamily: 'Pretendard',
           colorScheme: ColorScheme.fromSeed(seedColor: green),
         ),
         builder: (context, child) => MediaQuery(
@@ -53,6 +54,32 @@ void main() {
   OfflineAssistant assistant() => OfflineAssistant(
     search: (_) async => const ManualRagResult(assistantSources, 'keyword'),
   );
+
+  testWidgets('음성으로 받은 문장을 입력칸에 두고 사용자가 전송할 수 있다', (tester) async {
+    const channel = MethodChannel('maintenance/offline_speech');
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      expect(call.method, 'listen');
+      return '브레이크 상태를 어떻게 확인해?';
+    });
+    addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
+    final store = await mountChat(tester, assistant());
+    await tester.tap(find.byTooltip('음성 입력'));
+    await tester.pumpAndSettle();
+    final input = tester.widget<TextField>(
+      find.byKey(const ValueKey('assistant-question')),
+    );
+    expect(input.controller!.text, '브레이크 상태를 어떻게 확인해?');
+    expect(store.questions, isEmpty);
+    expect(
+      tester
+          .widget<FilledButton>(find.byKey(const ValueKey('assistant-send')))
+          .onPressed,
+      isNotNull,
+    );
+  });
+
   testWidgets('질문을 보내면 로컬 점검 답변과 선택 차량 질문 이력을 저장한다', (tester) async {
     final store = await mountChat(tester, assistant());
     final button = find.byKey(const ValueKey('assistant-send'));
@@ -93,6 +120,8 @@ void main() {
     await tester.tap(source);
     await tester.pumpAndSettle();
     expect(find.byType(AlertDialog), findsOneWidget);
+    await tester.tap(find.text('책자에서 가져온 글 보기'));
+    await tester.pumpAndSettle();
     expect(find.text(assistantSources.first.text), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
@@ -131,7 +160,7 @@ void main() {
       'MOCK-RX-0002',
     );
     await tester.pumpAndSettle();
-    expect(find.text('질문 예시'), findsOneWidget);
+    expect(find.text('추천 질문'), findsOneWidget);
     expect(store.questions.first['vehicleId'], 'MOCK-RX-0001');
     expect(tester.takeException(), isNull);
   });

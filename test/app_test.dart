@@ -8,6 +8,19 @@ import 'package:military_maintenance/data/adaptive_runtime.dart';
 import 'package:military_maintenance/data/clock.dart';
 import 'package:military_maintenance/main.dart';
 
+Future<void> loadAppFonts() async {
+  final font = FontLoader('Pretendard')
+    ..addFont(rootBundle.load('assets/fonts/Pretendard-Regular.otf'))
+    ..addFont(rootBundle.load('assets/fonts/Pretendard-Medium.otf'))
+    ..addFont(rootBundle.load('assets/fonts/Pretendard-SemiBold.otf'))
+    ..addFont(rootBundle.load('assets/fonts/Pretendard-Bold.otf'))
+    ..addFont(rootBundle.load('assets/fonts/Pretendard-ExtraBold.otf'));
+  await font.load();
+  final icons = FontLoader('MaterialIcons')
+    ..addFont(rootBundle.load('fonts/MaterialIcons-Regular.otf'));
+  await icons.load();
+}
+
 Future<AppStore> mount(
   WidgetTester tester,
   Size size, {
@@ -15,12 +28,7 @@ Future<AppStore> mount(
 }) async {
   tester.view.physicalSize = size;
   tester.view.devicePixelRatio = 1;
-  final font = FontLoader('NotoSansKR')
-    ..addFont(rootBundle.load('assets/fonts/NotoSansKR.ttf'));
-  await font.load();
-  final icons = FontLoader('MaterialIcons')
-    ..addFont(rootBundle.load('fonts/MaterialIcons-Regular.otf'));
-  await icons.load();
+  await loadAppFonts();
   final store = AppStore(clock: () => DateTime(2026, 10, 9, 12));
   await tester.runAsync(() async {
     await store.initialize(database: LocalDatabase(NativeDatabase.memory()));
@@ -127,7 +135,8 @@ void main() {
     );
     appRouter.go('/plans?vehicle=MOCK-RX-0001');
     await tester.pumpAndSettle();
-    expect(find.text('연간 정비계획'), findsNWidgets(2));
+    expect(find.text('연간 정비계획'), findsOneWidget);
+    await revealWidget(tester, find.text('정비 주기 전체'));
     expect(find.textContaining('MOCK-RX-0001 · 브레이크패드'), findsWidgets);
     expect(tester.takeException(), isNull);
     await expectLater(
@@ -142,7 +151,7 @@ void main() {
     final store = await mount(tester, const Size(1440, 1080));
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
-    expect(find.text('종합 현황'), findsNWidgets(2));
+    expect(find.text('종합 현황'), findsOneWidget);
     expect(find.text('로그인'), findsNothing);
     appRouter.go('/vehicles');
     await tester.pumpAndSettle();

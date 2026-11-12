@@ -6,6 +6,15 @@ import 'package:military_maintenance/data/adaptive_runtime.dart';
 import 'package:military_maintenance/data/store.dart';
 
 void main() {
+  test('문자가 깨진 책자 문장은 답변 후보에서 제외한다', () {
+    const sources = {
+      'broken': '오일 필터의 � 부품을 확인한다. 오 일 필 터 부 품을 확인한다.',
+      'valid': '오일 필 터의 고정 상태를 확인한다.',
+    };
+    final rows = LocalSummary.candidates(sources, question: '오일 필터 확인');
+    expect(rows.map((row) => row.citation), ['valid']);
+  });
+
   test('빠른 원문 요약은 OCR 수치와 정비 주기를 자동 답변하지 않는다', () {
     final e = MaintenanceEvidence(
       id: 'OCR',

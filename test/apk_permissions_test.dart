@@ -9,7 +9,7 @@ uses-permission: name='android.permission.CAMERA'
 const backupDisabled = 'A: android:allowBackup(0x01010280)=(type 0x12)0x0';
 
 void main() {
-  test('최종 APK는 촬영 권한을 유지하고 네트워크·녹음·저장소 권한과 자동 백업을 금지한다', () async {
+  test('최종 APK는 촬영 권한을 유지하고 네트워크·저장소 권한과 자동 백업을 금지한다', () async {
     final result = await inspectApk(
       'build/app/outputs/apk/debug/app-debug.apk',
     );
@@ -21,7 +21,6 @@ void main() {
     for (final permission in [
       'INTERNET',
       'ACCESS_NETWORK_STATE',
-      'RECORD_AUDIO',
       'READ_EXTERNAL_STORAGE',
       'WRITE_EXTERNAL_STORAGE',
       'MANAGE_EXTERNAL_STORAGE',

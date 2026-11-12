@@ -135,6 +135,19 @@ void main() {
     );
     expect(search('가상 타이어', document: 'CHASSIS')['hits'], hasLength(1));
   });
+  test('일상 표현으로 검색하면 같은 부품의 책자 용어를 찾고 다른 부품은 제외한다', () {
+    final db = sqlite3.open(path);
+    for (final (id, text) in [('P1', '헤드램프를 탈거한다.'), ('P2', '타이어를 탈거한다.')]) {
+      db.execute('UPDATE pages SET text=?, search_text=? WHERE id=?', [
+        text,
+        text.replaceAll(' ', ''),
+        id,
+      ]);
+    }
+    db.close();
+    final hits = (search('전조등 분리 방법')['hits'] as List).cast<Map>();
+    expect(hits.map((hit) => hit['id']), ['P1']);
+  });
   test('불일치 모델과 손상된 벡터는 검색 결과로 사용하지 않는다', () {
     expect(
       () => searchManualCorpus(

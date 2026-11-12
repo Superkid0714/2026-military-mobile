@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:military_maintenance/data/adaptive_runtime.dart';
@@ -9,11 +10,87 @@ import 'package:military_maintenance/data/front_inspection.dart';
 import 'package:military_maintenance/data/store.dart';
 import 'package:military_maintenance/main.dart';
 import 'package:military_maintenance/ui/front_inspection.dart';
+import 'package:military_maintenance/ui/inspection_display.dart';
 
 import 'data_tools_test.dart' show tapWithIo;
 import 'ui_usability_test.dart' show setup, reveal, tap;
 
 void main() {
+  test('인식 점수는 모델 값을 유지하고 없거나 잘못된 값을 구분한다', () {
+    Map<String, Object?> output(Object? score, {bool include = true}) => {
+      'modelId': FrontPartProposal.modelId,
+      'proposals': [
+        {
+          'part': 'hood',
+          'box': [.2, .2, .6, .6],
+          if (include) 'score': score,
+        },
+      ],
+    };
+    final found = FrontPartProposal.decode(output(.875))[FrontPart.hood]!;
+    expect(found.score, .875);
+    expect(found.scoreLabel, '인식 점수 87.5%');
+    expect(
+      FrontPartProposal.decode(
+        output(null, include: false),
+      )[FrontPart.hood]!.scoreLabel,
+      '점수 없음',
+    );
+    for (final invalid in [-.1, 1.1, double.nan, double.infinity, '90%']) {
+      expect(
+        () => FrontPartProposal.decode(output(invalid)),
+        throwsFormatException,
+      );
+    }
+    expect(
+      FrontPartProposal.decode({
+        'modelId': FrontPartProposal.modelId,
+        'proposals': [],
+      }),
+      isEmpty,
+    );
+  });
+
+  testWidgets('분석 박스가 사진 비율을 유지하고 선택한 부위를 전달한다', (tester) async {
+    final bytes = File('test/fixtures/manual_preview.jpg').readAsBytesSync();
+    FrontPart? selected;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Center(
+            child: SizedBox(
+              width: 500,
+              height: 300,
+              child: DetectedPartsFrame(
+                bytes: bytes,
+                proposals: const {
+                  FrontPart.hood: FrontPartProposal(.2, .25, .6, .75),
+                },
+                onSelected: (part) => selected = part,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 80)),
+    );
+    await tester.pumpAndSettle();
+    final picture = tester.getRect(find.byType(Image));
+    final candidate = find.byWidgetPredicate(
+      (widget) => widget is Semantics && widget.properties.label == '보닛 위치 후보',
+    );
+    final box = tester.getRect(candidate);
+    expect(box.left, closeTo(picture.left + picture.width * .2, .1));
+    expect(box.top, closeTo(picture.top + picture.height * .25, .1));
+    expect(box.width, closeTo(picture.width * .4, .1));
+    expect(box.height, closeTo(picture.height * .5, .1));
+    await tester.tap(candidate);
+    expect(selected, FrontPart.hood);
+    expect(tester.takeException(), isNull);
+  });
+
   test('기존 사진 기록은 읽을 수 있고 잘못된 사진 좌표는 거부한다', () {
     expect(FrontObservation.decode(null), isEmpty);
     for (final observation in [
@@ -109,10 +186,14 @@ void main() {
       final messenger =
           TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
       final runtimeCalls = <String>[];
+      Completer<void>? inferenceGate;
       messenger.setMockMethodCallHandler(AndroidModelWorker.channel, (
         call,
       ) async {
         runtimeCalls.add(call.method);
+        if (call.method == 'infer' && inferenceGate != null) {
+          await inferenceGate.future;
+        }
         return switch (call.method) {
           'modelInfo' => {
             'optionalModels': [
@@ -146,7 +227,8 @@ void main() {
       });
       final previousCamera = CameraPlatform.instance;
       final previousPaths = PathProviderPlatform.instance;
-      CameraPlatform.instance = _TestCamera(path);
+      final camera = _TestCamera(path);
+      CameraPlatform.instance = camera;
       PathProviderPlatform.instance = _TestPaths(directory.path);
       addTearDown(() {
         CameraPlatform.instance = previousCamera;
@@ -173,24 +255,86 @@ void main() {
             capture.evaluate().isNotEmpty &&
             tester.widget<FilledButton>(capture).onPressed != null,
       );
+      if (area == FrontInspectionArea.exterior) {
+        await tapWithIo(
+          tester,
+          find.text('화면 분석 켜기'),
+          completed: () => runtimeCalls.contains('infer'),
+        );
+        for (var i = 0; i < 30; i++) {
+          await tester.runAsync(
+            () => Future<void>.delayed(const Duration(milliseconds: 20)),
+          );
+          await tester.pump();
+          if (find.byType(DetectedPartsFrame).evaluate().isNotEmpty) break;
+        }
+        expect(find.byType(DetectedPartsFrame), findsOneWidget);
+        expect(store.inspections, isEmpty);
+        await tester.tap(find.text('화면 분석 끄기'));
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 30)),
+        );
+        await tester.pumpAndSettle();
+        expect(find.byType(DetectedPartsFrame), findsNothing);
+        expect(File(path).existsSync(), isTrue);
+      } else {
+        expect(find.text('화면 분석 켜기'), findsNothing);
+      }
       await reveal(tester, shutter);
+      expect(find.byType(CameraAlignmentFrame), findsOneWidget);
+      final guide = tester.widget<InspectionDiagram>(
+        find.byType(InspectionDiagram),
+      );
+      expect(guide.area, area);
+      expect(find.text('마지막 저장 상태'), findsOneWidget);
+      if (area == FrontInspectionArea.exterior) {
+        inferenceGate = Completer<void>();
+        final previousCalls = runtimeCalls
+            .where((call) => call == 'infer')
+            .length;
+        await tapWithIo(
+          tester,
+          find.text('화면 분석 켜기'),
+          completed: () =>
+              runtimeCalls.where((call) => call == 'infer').length >
+              previousCalls,
+        );
+      }
       await tester.runAsync(() async {
+        final picturesBeforeCapture = camera.pictures;
         await tester.tap(shutter);
-        final images = Directory('${directory.path}/inspection_images');
-        for (var i = 0; i < 200; i++) {
-          final files = images.existsSync()
-              ? images.listSync()
-              : <FileSystemEntity>[];
-          if (files.isNotEmpty && File(files.single.path).lengthSync() > 0) {
-            await precacheImage(
-              FileImage(File(files.single.path)),
-              tester.element(find.byType(Scaffold).first),
-            );
-            return;
-          }
+        if (area == FrontInspectionArea.exterior) {
           await Future<void>.delayed(const Duration(milliseconds: 20));
+          expect(
+            camera.pictures,
+            picturesBeforeCapture,
+            reason: '분석 중에는 기록 촬영을 겹쳐 실행하지 않는다',
+          );
+          inferenceGate!.complete();
         }
       });
+      final images = Directory('${directory.path}/inspection_images');
+      var copied = false;
+      for (var i = 0; i < 200; i++) {
+        await tester.pump(const Duration(milliseconds: 20));
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 20)),
+        );
+        final files = images.existsSync()
+            ? images.listSync()
+            : <FileSystemEntity>[];
+        if (files.isNotEmpty && File(files.single.path).lengthSync() > 0) {
+          await tester.runAsync(
+            () => precacheImage(
+              FileImage(File(files.single.path)),
+              tester.element(find.byType(Scaffold).first),
+            ),
+          );
+          copied = true;
+          break;
+        }
+      }
+      expect(copied, isTrue, reason: '분석 종료 후 점검 사진을 복사해야 한다');
       await tester.pumpAndSettle();
 
       final photo = find.byType(FrontPhoto);
@@ -259,12 +403,16 @@ class _TestPaths extends PathProviderPlatform {
 
   @override
   Future<String?> getApplicationDocumentsPath() async => directory;
+
+  @override
+  Future<String?> getTemporaryPath() async => Directory.systemTemp.path;
 }
 
 class _TestCamera extends CameraPlatform {
   _TestCamera(this.path);
 
   final String path;
+  int pictures = 0;
 
   @override
   Future<List<CameraDescription>> availableCameras() async => const [
@@ -313,7 +461,10 @@ class _TestCamera extends CameraPlatform {
   Widget buildPreview(int cameraId) => const SizedBox.expand();
 
   @override
-  Future<XFile> takePicture(int cameraId) async => XFile(path);
+  Future<XFile> takePicture(int cameraId) async {
+    pictures++;
+    return XFile(path);
+  }
 
   @override
   Future<void> dispose(int cameraId) async {}

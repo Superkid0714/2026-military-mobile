@@ -21,6 +21,7 @@ void main() {
     WidgetTester tester, {
     bool missing = false,
     bool compact = false,
+    bool withExplanation = false,
   }) async {
     tester.view.physicalSize = Size(compact ? 600 : 1280, compact ? 800 : 1000);
     tester.view.devicePixelRatio = 1;
@@ -50,14 +51,33 @@ void main() {
                 .copyWith(textScaler: TextScaler.linear(compact ? 1.6 : 1)),
             child: child!,
           ),
-          home: const Scaffold(
-            body: SingleChildScrollView(child: ManualPageImageCard(evidence)),
+          home: Scaffold(
+            body: SingleChildScrollView(
+              child: ManualPageImageCard(
+                evidence,
+                explanation: withExplanation ? const Text('부품을 분리합니다.') : null,
+              ),
+            ),
           ),
         ),
       ),
     );
     await tester.pumpAndSettle();
   }
+
+  testWidgets('설명과 원본 그림을 넓은 화면에서 나란히 표시한다', (tester) async {
+    await mount(tester, withExplanation: true);
+    final text = tester.getRect(find.text('부품을 분리합니다.'));
+    final picture = tester.getRect(find.byType(Image));
+    expect(picture.left, greaterThan(text.right));
+    expect(picture.top, closeTo(text.top, 1));
+  });
+
+  testWidgets('원본 그림이 없어도 설명을 읽을 수 있다', (tester) async {
+    await mount(tester, missing: true, withExplanation: true);
+    expect(find.text('부품을 분리합니다.'), findsOneWidget);
+    expect(find.byType(Image), findsNothing);
+  });
 
   testWidgets('미리보기에서 확대창을 열고 확대·원래 크기·닫기를 사용할 수 있다', (tester) async {
     await mount(tester);

@@ -4,24 +4,21 @@ import 'dart:ui' as ui;
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:military_maintenance/data/store.dart';
+import 'package:military_maintenance/ui/analysis_charts.dart';
 import 'package:military_maintenance/ui/components.dart';
 import 'package:military_maintenance/ui/management.dart';
+
+import 'app_test.dart' show loadAppFonts;
 
 Future<AppStore> prepare(WidgetTester tester) async {
   tester.view.physicalSize = const Size(1280, 1100);
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.resetPhysicalSize);
   addTearDown(tester.view.resetDevicePixelRatio);
-  final fonts = FontLoader('NotoSansKR')
-    ..addFont(rootBundle.load('assets/fonts/NotoSansKR.ttf'));
-  await fonts.load();
-  final icons = FontLoader('MaterialIcons')
-    ..addFont(rootBundle.load('fonts/MaterialIcons-Regular.otf'));
-  await icons.load();
+  await loadAppFonts();
   final s = AppStore(clock: () => DateTime(2026, 10, 9, 12));
   await tester.runAsync(
     () => s.initialize(database: LocalDatabase(NativeDatabase.memory())),
@@ -40,7 +37,7 @@ Future<void> show(WidgetTester tester, AppStore store, Widget screen) async {
       child: MaterialApp(
         theme: ThemeData(
           useMaterial3: true,
-          fontFamily: 'NotoSansKR',
+          fontFamily: 'Pretendard',
           scaffoldBackgroundColor: surface,
           colorScheme: ColorScheme.fromSeed(
             seedColor: green,
@@ -124,7 +121,7 @@ void main() {
     await capture(tester, 'risk-ring-after');
     expect(tester.takeException(), isNull);
   });
-  testWidgets('실제 등록 대상만 집계하고 기록 추가가 숫자와 두 막대그래프에 반영된다', (tester) async {
+  testWidgets('실제 등록 대상만 집계하고 기록 추가가 숫자와 비중·추이 차트에 반영된다', (tester) async {
     final s = await prepare(tester);
     await tester.runAsync(() async {
       for (final id in ['VIS-1', 'VIS-2']) {
@@ -160,34 +157,23 @@ void main() {
       }
     });
     await show(tester, s, const AnalysisScreen());
-    expect(find.text('3건'), findsOneWidget);
+    expect(find.text('3건'), findsWidgets);
     expect(find.text('6,000원'), findsOneWidget);
     expect(find.text('2,000원'), findsWidgets);
     final scroll = find.byType(Scrollable).first;
     await tester.scrollUntilVisible(
-      find.text('월별 정비 건수 추이'),
+      find.text('월별 정비 건수'),
       250,
       scrollable: scroll,
     );
     await tester.pumpAndSettle();
-    Map<String, num> chart(String key) => tester
-        .widgetList<Bars>(find.byType(Bars))
-        .firstWhere((b) => b.values.containsKey(key))
+    Map<String, num> breakdown() => tester
+        .widget<MaintenanceBreakdown>(find.byType(MaintenanceBreakdown))
         .values;
-    expect(chart('제동'), {'엔진/연료': 2, '제동': 1});
-    expect(chart('2026-01'), {'2026-01': 1, '2026-02': 2});
-    final bars =
-        tester
-            .widgetList<LinearProgressIndicator>(
-              find.descendant(
-                of: find.byType(Bars),
-                matching: find.byType(LinearProgressIndicator),
-              ),
-            )
-            .map((b) => b.value!)
-            .toList()
-          ..sort();
-    expect(bars, [.5, .5, 1, 1]);
+    Map<String, num> trend() =>
+        tester.widget<MaintenanceTrend>(find.byType(MaintenanceTrend)).values;
+    expect(breakdown(), {'엔진/연료': 2, '제동': 1});
+    expect(trend(), {'2026-01': 1, '2026-02': 2});
     await capture(tester, 'analysis-before');
     await tester.runAsync(
       () => s.addMaintenance(
@@ -203,21 +189,8 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    expect(chart('제동'), {'엔진/연료': 3, '제동': 1});
-    expect(chart('2026-01'), {'2026-01': 1, '2026-02': 3});
-    final updated =
-        tester
-            .widgetList<LinearProgressIndicator>(
-              find.descendant(
-                of: find.byType(Bars),
-                matching: find.byType(LinearProgressIndicator),
-              ),
-            )
-            .map((b) => b.value!)
-            .toList()
-          ..sort();
-    expect(updated[0], closeTo(1 / 3, 1e-10));
-    expect(updated.last, 1);
+    expect(breakdown(), {'엔진/연료': 3, '제동': 1});
+    expect(trend(), {'2026-01': 1, '2026-02': 3});
     await capture(tester, 'analysis-after');
     await tester.scrollUntilVisible(
       find.text('누적 정비 비용'),
@@ -225,7 +198,13 @@ void main() {
       scrollable: scroll,
     );
     await tester.pumpAndSettle();
-    expect(find.text('4건'), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byType(MaintenanceBreakdown),
+        matching: find.text('4건'),
+      ),
+      findsOneWidget,
+    );
     expect(find.text('10,000원'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });

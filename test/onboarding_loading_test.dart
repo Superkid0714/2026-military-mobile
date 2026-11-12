@@ -4,8 +4,10 @@ import 'dart:ui' as ui;
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:military_maintenance/data/store.dart';
+import 'package:military_maintenance/main.dart';
 import 'package:military_maintenance/ui/onboarding.dart';
 import 'package:military_maintenance/ui/maintenance_loading.dart';
 import 'package:military_maintenance/ui/maintenance_mascot.dart';
@@ -61,43 +63,130 @@ void main() {
       );
     }
   });
-  for (final size in [const Size(600, 800), const Size(1280, 800)]) {
-    testWidgets('온보딩 3단계와 큰 글자 버튼 ${size.width}', (tester) async {
+  testWidgets('첫 실행의 차량 등록과 예시 안내가 실제 화면을 연다', (tester) async {
+    final store = await prepare(tester);
+    tester.platformDispatcher.accessibilityFeaturesTestValue =
+        const FakeAccessibilityFeatures(disableAnimations: true);
+    addTearDown(tester.platformDispatcher.clearAccessibilityFeaturesTestValue);
+    appRouter.go('/');
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [storeProvider.overrideWith((ref) => store)],
+        child: const MilitaryApp(),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(store.onboardingCompleted, isFalse);
+    await tester.runAsync(() async {
+      await tester.tap(find.text('내 차량 등록하기'));
+      for (var i = 0; i < 100 && !store.onboardingCompleted; i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
+    });
+    await tester.pumpAndSettle();
+    expect(store.onboardingCompleted, isTrue);
+    expect(find.text('1. 내 차량 등록'), findsOneWidget);
+
+    appRouter.go('/welcome');
+    await tester.pumpAndSettle();
+    await tester.runAsync(() async {
+      await tester.tap(find.text('사용 안내 시작'));
+      for (var i = 0; i < 200; i++) {
+        if (appRouter
+                .routeInformationProvider
+                .value
+                .uri
+                .queryParameters['guide'] ==
+            '0') {
+          break;
+        }
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
+    });
+    await tester.pumpAndSettle();
+    expect(store.dashboardExampleView, isTrue);
+    expect(find.text('다음 점검'), findsOneWidget);
+    for (final title in [
+      '차량 상태 지도',
+      '정비 결과 기록',
+      '정비 도우미',
+      '더 보기',
+      '차량 목록',
+      '연간 정비계획',
+      '정비 분석',
+      '책자 검색',
+      '초기 설정',
+      '데이터 관리',
+    ]) {
+      await tester.tap(find.text('다음'));
+      if (title == '책자 검색') {
+        await tester.pump();
+      } else {
+        await tester.pumpAndSettle();
+      }
+      expect(find.text(title), findsWidgets);
+    }
+    await tester.tap(find.text('안내 마치기'));
+    await tester.pumpAndSettle();
+    expect(find.byType(ExampleGuide), findsNothing);
+    expect(find.text('다음 점검'), findsOneWidget);
+  });
+  for (final size in [
+    const Size(360, 640),
+    const Size(600, 800),
+    const Size(1280, 800),
+  ]) {
+    testWidgets('온보딩 선택과 큰 글자 버튼 ${size.width}', (tester) async {
       await prepare(tester);
       tester.view.physicalSize = size;
-      var completed = 0;
+      final actions = <OnboardingAction>[];
       await tester.pumpWidget(
         MaterialApp(
-          theme: ThemeData(fontFamily: 'NotoSansKR'),
+          theme: ThemeData(
+            fontFamily: 'Pretendard',
+            colorScheme: ColorScheme.fromSeed(
+              seedColor: const Color(0xFF00733B),
+              primary: const Color(0xFF00733B),
+            ),
+          ),
           builder: (context, child) => MediaQuery(
-            data: MediaQuery.of(context)
-                .copyWith(textScaler: TextScaler.linear(1.6)),
+            data: MediaQuery.of(context).copyWith(
+              textScaler: TextScaler.linear(1.6),
+              disableAnimations: true,
+            ),
             child: child!,
           ),
           home: RepaintBoundary(
             key: const ValueKey('capture'),
             child: OnboardingScreen(
-              onComplete: () async {
-                completed++;
+              onComplete: (action) async {
+                actions.add(action);
               },
             ),
           ),
         ),
       );
       await tester.pumpAndSettle();
-      for (var i = 0; i < 3; i++) {
-        expect(find.text('${i + 1} / 3'), findsOneWidget);
-        await snapshot(tester, 'intro-${size.width.toInt()}-$i');
-        final button = find.text(i < 2 ? '다음' : '정비온 시작하기');
+      await tester.runAsync(
+        () => precacheImage(
+          const ResizeImage(
+            AssetImage('assets/branding/jungbion-vehicle-logo.png'),
+            width: 384,
+          ),
+          tester.element(find.byType(OnboardingScreen)),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('어서 오세요!'), findsOneWidget);
+      await snapshot(tester, 'intro-${size.width.toInt()}');
+      for (final label in ['사용 안내 시작', '내 차량 등록하기', '건너뛰기']) {
+        final button = find.text(label);
         await tester.ensureVisible(button);
         await tester.tap(button);
         await tester.pumpAndSettle();
         expect(tester.takeException(), isNull);
       }
-      expect(completed, 1);
-      await tester.tap(find.text('건너뛰기'));
-      await tester.pumpAndSettle();
-      expect(completed, 2);
+      expect(actions, OnboardingAction.values);
     });
   }
   testWidgets('정비 캐릭터를 작업·복귀·휴식 자세로 렌더링한다', (tester) async {
@@ -151,7 +240,7 @@ void main() {
     await prepare(tester);
     Future<void> show({bool reduced = false}) => tester.pumpWidget(
       MaterialApp(
-        theme: ThemeData(fontFamily: 'NotoSansKR'),
+        theme: ThemeData(fontFamily: 'Pretendard'),
         home: MediaQuery(
           data: MediaQueryData(
             size: const Size(600, 800),
