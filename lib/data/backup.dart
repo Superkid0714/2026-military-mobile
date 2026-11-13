@@ -155,6 +155,7 @@ class BackupSnapshot {
             }
           case 'inspections':
             FrontObservation.decode(row['front']);
+            PhotoMark.decode(row['marks']);
             if ((row['conceptId'] != null && !validId(row['conceptId'])) ||
                 (row['conceptConfirmedAt'] != null &&
                     (!date(row['conceptConfirmedAt']) ||

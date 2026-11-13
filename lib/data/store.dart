@@ -150,11 +150,20 @@ class Inspection {
     this.conceptConfirmedAt,
     this.vision,
     this.front = const {},
+    this.marks = const [],
   });
   final String id, vehicleId, area, mode, created, imagePath, note;
   final String? conceptId, conceptConfirmedAt, audioPath, audioPart;
   final Map<String, dynamic>? vision;
   final Map<FrontPart, FrontObservation> front;
+  final List<PhotoMark> marks;
+  List<PhotoMark> get displayMarks => marks.isNotEmpty
+      ? marks
+      : [
+          for (final observation in front.values)
+            if (observation.x != null && observation.y != null)
+              PhotoMark(observation.x!, observation.y!),
+        ];
   String? get confirmedConceptId =>
       conceptConfirmedAt == null ? null : conceptId;
   Map<String, dynamic> toJson() => {
@@ -170,6 +179,7 @@ class Inspection {
     if (conceptId != null) 'conceptId': conceptId,
     if (conceptConfirmedAt != null) 'conceptConfirmedAt': conceptConfirmedAt,
     if (vision != null) 'vision': vision,
+    if (marks.isNotEmpty) 'marks': marks.map((mark) => mark.toJson()).toList(),
     if (front.isNotEmpty)
       'front': {
         for (final entry in front.entries) entry.key.name: entry.value.toJson(),
@@ -186,6 +196,7 @@ class Inspection {
     audioPart: j['audioPart'] as String?,
     note: j['note'],
     front: FrontObservation.decode(j['front']),
+    marks: PhotoMark.decode(j['marks']),
     conceptId: j['conceptId'] as String?,
     conceptConfirmedAt: j['conceptConfirmedAt'] as String?,
     vision: j['vision'] == null
@@ -281,6 +292,7 @@ class AppStore extends ChangeNotifier {
   LocalDatabase? db;
   bool ready = false;
   bool dashboardExampleView = false;
+  bool _includePresentationFleet = false;
   bool onboardingCompleted = false;
 
   Future<void> completeOnboarding() async {
@@ -304,7 +316,9 @@ class AppStore extends ChangeNotifier {
   List<Vehicle> get registeredVehicles =>
       vehicles.where((v) => !v.id.startsWith('MOCK-')).toList();
   List<Vehicle> get activeVehicles =>
-      dashboardExampleView && presentationVehicles.isNotEmpty
+      _includePresentationFleet && presentationVehicles.isNotEmpty
+      ? [...registeredVehicles, ...presentationVehicles]
+      : dashboardExampleView && presentationVehicles.isNotEmpty
       ? presentationVehicles
       : registeredVehicles.isEmpty
       ? vehicles
@@ -410,8 +424,12 @@ class AppStore extends ChangeNotifier {
         );
       }
       await _seed();
-      if (populatePresentation) await _seedPresentationFleet();
+      if (populatePresentation) {
+        await _seedPresentationFleet();
+        await _updatePresentationVehicleProfiles();
+      }
       await _read();
+      _includePresentationFleet = populatePresentation;
       ready = true;
       error = null;
       initializationCause = null;
@@ -829,6 +847,7 @@ class AppStore extends ChangeNotifier {
           ..remove('conceptId')
           ..remove('conceptConfirmedAt');
         FrontObservation.decode(data['front']);
+        PhotoMark.decode(data['marks']);
         final audio = value.audioPath;
         if (value.audioPart != null &&
             (audio == null ||

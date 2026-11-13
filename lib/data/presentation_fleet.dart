@@ -3,12 +3,14 @@ part of 'store.dart';
 extension PresentationFleet on AppStore {
   List<Vehicle> get presentationVehicles =>
       vehicles.where((v) => v.id.startsWith('MOCK-OPS-')).toList();
-  List<Vehicle> get dashboardVehicles =>
-      dashboardExampleView && presentationVehicles.isNotEmpty
-      ? presentationVehicles
-      : presentationVehicles.isNotEmpty
-      ? registeredVehicles
-      : activeVehicles;
+  List<Vehicle> get dashboardVehicles {
+    if (_includePresentationFleet) return activeVehicles;
+    final registered = registeredVehicles;
+    if (registered.isNotEmpty) return registered;
+    final examples = presentationVehicles;
+    if (examples.isEmpty) return activeVehicles;
+    return dashboardExampleView ? examples : registered;
+  }
 
   Future<void> setDashboardExampleView(bool enabled) async {
     await db!.customStatement(
@@ -35,6 +37,7 @@ extension PresentationFleet on AppStore {
       await _seedAdditionalMaintenance(
         DateTime.parse(exists.read<String>('value')),
       );
+      await _seedPresentationSchedules();
       return;
     }
     final now = clock();
@@ -182,7 +185,101 @@ extension PresentationFleet on AppStore {
       }
     });
     await _seedAdditionalMaintenance(today);
+    await _seedPresentationSchedules();
   }
+
+  Future<void> _updatePresentationVehicleProfiles() =>
+      db!.transaction(() async {
+        const profiles = [
+          '렉스턴 스포츠',
+          '봉고 III 1톤',
+          '스타리아 11인승',
+          '마이티 2.5톤',
+          '포터 II 1톤',
+          '쏠라티 15인승',
+          '렉스턴 스포츠',
+          '봉고 III 1톤',
+          '스타리아 11인승',
+          '마이티 2.5톤',
+          '포터 II 1톤',
+          '쏠라티 15인승',
+        ];
+        for (var i = 0; i < profiles.length; i++) {
+          final id = 'MOCK-OPS-${(i + 1).toString().padLeft(2, '0')}';
+          final row = await db!
+              .customSelect(
+                'SELECT payload FROM vehicles WHERE id = ?',
+                variables: [Variable<String>(id)],
+              )
+              .getSingleOrNull();
+          if (row == null) continue;
+          final payload =
+              jsonDecode(row.read<String>('payload')) as Map<String, dynamic>;
+          if (payload['model'] == profiles[i]) continue;
+          payload['model'] = profiles[i];
+          await _put('vehicles', id, payload);
+        }
+      });
+
+  Future<void> _seedPresentationSchedules() => db!.transaction(() async {
+    const marker = 'presentation_schedules_v1';
+    final completed = await db!
+        .customSelect(
+          'SELECT value FROM app_metadata WHERE key = ?',
+          variables: [const Variable<String>(marker)],
+        )
+        .getSingleOrNull();
+    if (completed != null) return;
+    final existing = await db!
+        .customSelect(
+          "SELECT value FROM app_metadata WHERE key = 'maintenance_schedules'",
+        )
+        .getSingleOrNull();
+    final schedules = existing == null
+        ? <MaintenanceSchedule>[]
+        : MaintenanceSchedule.decode(existing.read<String>('value'));
+    final now = clock();
+    const jobs = [
+      (1, 4, '타이어 공기압·마모 점검', '예비 타이어도 함께 확인'),
+      (2, 9, '엔진오일·필터 교환', '교환 후 누유 여부 확인'),
+      (3, 9, '브레이크 패드 점검', '좌우 패드 잔량 기록'),
+      (4, 15, '배터리 전압 점검', '시동 전압과 단자 체결 상태 확인'),
+      (5, 21, '냉각수·호스 점검', '냉각수량과 연결부 누수 확인'),
+      (6, 26, '등화장치 점검', '전조등과 방향지시등 작동 확인'),
+    ];
+    final vehicleRows = await db!
+        .customSelect("SELECT id FROM vehicles WHERE id LIKE 'MOCK-OPS-%'")
+        .get();
+    final ids = vehicleRows.map((row) => row.read<String>('id')).toSet();
+    final existingIds = schedules.map((item) => item.id).toSet();
+    for (var offset = -1; offset <= 2; offset++) {
+      for (final (vehicle, day, title, note) in jobs) {
+        final date = DateTime(
+          now.year,
+          now.month + offset,
+          day,
+        ).toIso8601String().substring(0, 10);
+        final vehicleId = 'MOCK-OPS-${vehicle.toString().padLeft(2, '0')}';
+        final id = 'DEMO-SCHEDULE-$vehicleId-$date';
+        if (ids.contains(vehicleId) && existingIds.add(id)) {
+          schedules.add(
+            MaintenanceSchedule(
+              id: id,
+              vehicleId: vehicleId,
+              date: date,
+              title: title,
+              note: note,
+            ),
+          );
+        }
+      }
+    }
+    await _writeSchedules(schedules);
+    await db!.customStatement(
+      'INSERT INTO app_metadata (key,value) VALUES (?,?)',
+      [marker, now.toIso8601String()],
+    );
+  });
 
   Future<void> _seedAdditionalMaintenance(DateTime anchor) async {
     const marker = 'presentation_maintenance_v2';

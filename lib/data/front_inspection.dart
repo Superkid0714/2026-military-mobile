@@ -161,3 +161,31 @@ class FrontPartProposal {
     return Map.unmodifiable(proposals);
   }
 }
+
+/// A user marker relative to the original photo, independent of parts or status.
+class PhotoMark {
+  const PhotoMark(this.x, this.y);
+  final double x, y;
+  Map<String, double> toJson() => {'x': x, 'y': y};
+  static List<PhotoMark> decode(Object? raw) {
+    if (raw == null) return const [];
+    if (raw is! List || raw.length > 100) {
+      throw const FormatException('사진 마크가 올바르지 않습니다.');
+    }
+    return raw.map((item) {
+      if (item is! Map) throw const FormatException('사진 마크가 올바르지 않습니다.');
+      final x = item['x'], y = item['y'];
+      if (x is! num ||
+          y is! num ||
+          !x.isFinite ||
+          !y.isFinite ||
+          x < 0 ||
+          x > 1 ||
+          y < 0 ||
+          y > 1) {
+        throw const FormatException('사진 마크 좌표가 올바르지 않습니다.');
+      }
+      return PhotoMark(x.toDouble(), y.toDouble());
+    }).toList();
+  }
+}
