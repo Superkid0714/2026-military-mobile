@@ -51,7 +51,7 @@ class ManualUiInstrumentation : Instrumentation() {
         bitmap.recycle()
     }
     private fun navigate(text:String) {
-        if (text in listOf("차량 등록·설정", "책자 검색", "정비 분석") && find(text, true) == null) {
+        if (text in listOf("차량 등록", "사용 안내", "책자 검색", "정비 분석") && find(text, true) == null) {
             navigate("더 보기")
             click(waitFor(text))
             return
@@ -82,7 +82,7 @@ class ManualUiInstrumentation : Instrumentation() {
         waitFor("차량 사진 점검")
         waitFor("정비 결과 입력")
         waitFor("정비 질문하기")
-        waitFor("다음 점검")
+        waitFor("정비 일정")
         saveScreen("manual-ui-source.png")
         val db=android.database.sqlite.SQLiteDatabase.openDatabase(File(targetContext.applicationInfo.dataDir,"app_flutter/military.sqlite").path,null,android.database.sqlite.SQLiteDatabase.OPEN_READONLY)
         try {
@@ -102,20 +102,19 @@ class ManualUiInstrumentation : Instrumentation() {
         val firstLaunch = find(greeting) != null
         if (!firstLaunch) {
             waitFor("종합 현황", 60)
-            navigate("차량 등록·설정")
-            click(waitFor("정비온 사용 안내"))
+            navigate("사용 안내")
         }
         report["guideEntry"] = if (firstLaunch) "first_launch" else "replay"
         waitFor(greeting, 60)
         saveScreen("manual-ui-source.png")
         report["firstLaunchGuideVisible"] = firstLaunch
         click(waitFor("사용 안내 시작"))
-        waitFor("다음 점검")
+        waitFor("정비 일정")
         report["exampleDashboardOpened"] = true
         for (title in listOf(
             "사진으로 상태 남기기", "정비 결과 기록하기", "정비 질문하기",
             "필요한 기능 찾기", "차량별 상태 보기", "달력으로 일정 보기",
-            "정비 흐름 살펴보기", "책자에서 찾기", "내 차량 준비하기", "기록 보관하기"
+            "정비 흐름 살펴보기", "책자에서 찾기", "내 차량 등록하기"
         )) {
             click(waitFor("다음"))
             waitFor(title)
@@ -123,12 +122,12 @@ class ManualUiInstrumentation : Instrumentation() {
         click(waitFor("안내 마치기"))
         waitFor("종합 현황")
         report["exampleGuideCompleted"] = true
-        navigate("차량 등록·설정")
-        click(waitFor("정비온 사용 안내"))
+        navigate("사용 안내")
         click(waitFor("내 차량 등록하기"))
-        waitFor("내 차량 등록")
+        waitFor("새 차량 등록")
         report["registrationOpened"] = true
-        click(waitFor("정비온 사용 안내"))
+        navigate("홈")
+        navigate("사용 안내")
         waitFor(greeting)
         report["replayOpened"] = true
         click(waitFor("건너뛰기"))

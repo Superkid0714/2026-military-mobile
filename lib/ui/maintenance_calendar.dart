@@ -9,9 +9,13 @@ class MaintenanceCalendar extends StatelessWidget {
     required this.selected,
     required this.onMonthChanged,
     required this.onSelected,
+    this.compact = false,
+    this.pinColors = const {},
     super.key,
   });
 
+  final bool compact;
+  final Map<int, List<Color>> pinColors;
   final DateTime month;
   final Map<int, int> counts;
   final int? selected;
@@ -22,7 +26,7 @@ class MaintenanceCalendar extends StatelessWidget {
   Widget build(BuildContext context) {
     final days = DateTime(month.year, month.month + 1, 0).day;
     final offset = month.weekday % 7;
-    final cells = ((offset + days + 6) ~/ 7) * 7;
+    final cells = compact ? 42 : ((offset + days + 6) ~/ 7) * 7;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -70,7 +74,9 @@ class MaintenanceCalendar extends StatelessWidget {
           itemCount: cells,
           gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
             crossAxisCount: 7,
-            mainAxisExtent: MediaQuery.textScalerOf(context).scale(12) > 17
+            mainAxisExtent: compact
+                ? MediaQuery.textScalerOf(context).scale(16) + 20
+                : MediaQuery.textScalerOf(context).scale(12) > 17
                 ? 84
                 : 68,
             crossAxisSpacing: 4,
@@ -87,9 +93,9 @@ class MaintenanceCalendar extends StatelessWidget {
                   : count > 0
                   ? brandTint
                   : Colors.white,
-              borderRadius: BorderRadius.circular(8),
+              borderRadius: BorderRadius.circular(compact ? 12 : 8),
               child: InkWell(
-                borderRadius: BorderRadius.circular(8),
+                borderRadius: BorderRadius.circular(compact ? 12 : 8),
                 onTap: () => onSelected(day),
                 child: Semantics(
                   selected: active,
@@ -110,7 +116,23 @@ class MaintenanceCalendar extends StatelessWidget {
                               : FontWeight.w500,
                         ),
                       ),
-                      if (count > 0)
+                      if (compact)
+                        SizedBox(
+                          height: 12,
+                          child: FittedBox(
+                            fit: BoxFit.scaleDown,
+                            child: Row(
+                              children: [
+                                for (final color
+                                    in (pinColors[day] ?? const <Color>[]).take(
+                                      3,
+                                    ))
+                                  Icon(Icons.place, size: 12, color: color),
+                              ],
+                            ),
+                          ),
+                        )
+                      else if (count > 0)
                         Text(
                           '$count건',
                           style: TextStyle(

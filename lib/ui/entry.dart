@@ -221,6 +221,7 @@ class _EntryState extends ConsumerState<EntryScreen> {
               setState(() {});
             }
           },
+          decoration: const InputDecoration(errorMaxLines: 3),
           maxLines: lines,
           keyboardType: numeric
               ? TextInputType.number
@@ -403,6 +404,7 @@ class _EntryState extends ConsumerState<EntryScreen> {
                       ),
                       const SizedBox(height: 8),
                       DropdownButtonFormField<String>(
+                        isExpanded: true,
                         initialValue: vehicle,
                         items: s.vehicles
                             .map(
@@ -410,6 +412,7 @@ class _EntryState extends ConsumerState<EntryScreen> {
                                 value: v.id,
                                 child: Text(
                                   '${vehicleLabel(v.id)} · ${modelLabel(v.model)}',
+                                  overflow: TextOverflow.ellipsis,
                                 ),
                               ),
                             )
@@ -485,13 +488,17 @@ class _EntryState extends ConsumerState<EntryScreen> {
                         const SizedBox(height: 16),
                         field('수리부속 품명', part),
                         if (s.supportLibrary.knowledge.concepts.isNotEmpty) ...[
-                          Text(
-                            '자동 확정하지 않습니다. 후보: ${candidate?['name'] ?? '정확히 일치하는 후보 없음'}',
+                          note(
+                            candidate == null
+                                ? '일치하는 부품 후보가 없습니다. 목록에서 선택할 수 있습니다.'
+                                : '추천 부품: ${candidate['name']} · 확인 후 선택해 주세요.',
                           ),
+                          const SizedBox(height: 12),
                           DropdownButtonFormField<String>(
                             key: ValueKey(
                               'concept-selection-${part.text}-$conceptSelection',
                             ),
+                            isExpanded: true,
                             initialValue: conceptSelection ?? 'unconfirmed',
                             decoration: const InputDecoration(
                               labelText: '부품 이름 선택',
@@ -505,7 +512,10 @@ class _EntryState extends ConsumerState<EntryScreen> {
                                   in s.supportLibrary.knowledge.concepts)
                                 DropdownMenuItem(
                                   value: c['id'] as String,
-                                  child: Text(c['name'] as String),
+                                  child: Text(
+                                    c['name'] as String,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
                                 ),
                             ],
                             onChanged: (v) => setState(() {
@@ -514,11 +524,12 @@ class _EntryState extends ConsumerState<EntryScreen> {
                               conceptTouched = true;
                             }),
                           ),
+                          const SizedBox(height: 8),
                           CheckboxListTile(
                             key: const ValueKey('confirm-part-concept'),
                             contentPadding: EdgeInsets.zero,
-                            title: const Text('선택한 부품 이름과 이 정비 기록의 연결을 확인했습니다'),
-                            subtitle: const Text('장착 품번·적용조건의 확정을 뜻하지 않습니다.'),
+                            title: const Text('선택한 부품을 이 기록에 연결'),
+                            subtitle: const Text('품번과 적용 조건은 별도로 확인해 주세요.'),
                             value: confirmedConceptId != null,
                             onChanged: conceptSelection == null
                                 ? null
@@ -529,9 +540,11 @@ class _EntryState extends ConsumerState<EntryScreen> {
                                     conceptTouched = true;
                                   }),
                           ),
+                          const SizedBox(height: 16),
                         ],
                         DropdownButtonFormField<String>(
                           key: const ValueKey('replacement-completed'),
+                          isExpanded: true,
                           initialValue: replacementCompleted == null
                               ? 'unknown'
                               : replacementCompleted!
@@ -562,6 +575,7 @@ class _EntryState extends ConsumerState<EntryScreen> {
                                   };
                                 }),
                         ),
+                        const SizedBox(height: 8),
                         note(
                           replacementCompleted == null
                               ? '교환 여부를 확인하지 못한 기록입니다. 교환 기준을 갱신하지 않으며 잔여거리 계산이 보류될 수 있습니다.'
@@ -569,6 +583,7 @@ class _EntryState extends ConsumerState<EntryScreen> {
                               ? '실제 교환 당시 계기를 저장하여 다음 정비거리를 갱신합니다.'
                               : '교환하지 않은 점검·수리입니다. 교환 주기를 초기화하지 않습니다.',
                         ),
+                        const SizedBox(height: 16),
                         if (replacementCompleted == true) ...[
                           field(
                             '교환 당시 누적 주행거리(km)',
@@ -586,7 +601,7 @@ class _EntryState extends ConsumerState<EntryScreen> {
                           note(
                             '현재 등록 계기 ${number(old.distance)} km · 계기가 더 늘었다면 운용실적을 먼저 갱신해 주세요.',
                           ),
-                          const SizedBox(height: 12),
+                          const SizedBox(height: 16),
                         ],
                         const Text(
                           '정비 종류 *',
@@ -670,7 +685,7 @@ class _EntryState extends ConsumerState<EntryScreen> {
                               note(
                                 suggestion.system.label == null ||
                                         suggestion.type.label == null
-                                    ? 'AI 분류: 정비 종류과 구분을 직접 선택해 주세요.'
+                                    ? 'AI 분류: 정비 종류와 구분을 직접 선택해 주세요.'
                                     : 'AI 분류 제안: ${suggestion.system.label} · ${suggestion.type.label}. 실제 정비 결과는 직접 확인해 주세요.',
                               ),
                               if (suggestion.system.label != null &&
@@ -724,53 +739,51 @@ class _EntryState extends ConsumerState<EntryScreen> {
                         note(success!),
                         const SizedBox(height: 16),
                       ],
-                      Row(
+                      ResponsiveColumns(
+                        breakpoint:
+                            MediaQuery.textScalerOf(context).scale(16) > 20
+                            ? 440
+                            : 320,
                         children: [
-                          Expanded(
-                            child: OutlinedButton(
-                              onPressed: saving
-                                  ? null
-                                  : () => setState(() {
-                                      form.currentState?.reset();
-                                      part.clear();
-                                      cost.clear();
-                                      description.clear();
-                                      date = ref.read(currentTimeProvider);
-                                      maintenanceType = '미분류';
-                                      loadVehicle(s, vehicle!);
-                                      success = null;
-                                      savedRecordId = null;
-                                      inspectionId = null;
-                                      replacementCompleted =
-                                          widget.recordId == null
-                                          ? null
-                                          : s.records
-                                                .firstWhere(
-                                                  (r) =>
-                                                      r.id == widget.recordId,
-                                                )
-                                                .replacementCompleted;
-                                      odometer.clear();
-                                    }),
-                              child: const Text('입력 초기화'),
-                            ),
+                          OutlinedButton(
+                            onPressed: saving
+                                ? null
+                                : () => setState(() {
+                                    form.currentState?.reset();
+                                    part.clear();
+                                    cost.clear();
+                                    description.clear();
+                                    date = ref.read(currentTimeProvider);
+                                    maintenanceType = '미분류';
+                                    loadVehicle(s, vehicle!);
+                                    success = null;
+                                    savedRecordId = null;
+                                    inspectionId = null;
+                                    replacementCompleted =
+                                        widget.recordId == null
+                                        ? null
+                                        : s.records
+                                              .firstWhere(
+                                                (r) => r.id == widget.recordId,
+                                              )
+                                              .replacementCompleted;
+                                    odometer.clear();
+                                  }),
+                            child: const Text('입력 초기화'),
                           ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: FilledButton(
-                              onPressed: saving || savedRecordId != null
-                                  ? null
-                                  : save,
-                              child: saving
-                                  ? const SizedBox.square(
-                                      dimension: 20,
-                                      child: CircularProgressIndicator(
-                                        strokeWidth: 2,
-                                        color: Colors.white,
-                                      ),
-                                    )
-                                  : const Text('저장'),
-                            ),
+                          FilledButton(
+                            onPressed: saving || savedRecordId != null
+                                ? null
+                                : save,
+                            child: saving
+                                ? const SizedBox.square(
+                                    dimension: 20,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      color: Colors.white,
+                                    ),
+                                  )
+                                : const Text('저장'),
                           ),
                         ],
                       ),

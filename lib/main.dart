@@ -154,7 +154,10 @@ final appRouter = GoRouter(
         GoRoute(path: '/more', builder: (context, state) => const MoreScreen()),
         GoRoute(
           path: '/vehicles',
-          builder: (context, state) => const VehiclesScreen(),
+          builder: (context, state) => VehiclesScreen(
+            key: ValueKey(state.uri.toString()),
+            homeScope: state.uri.queryParameters['scope'] == 'home',
+          ),
           routes: [
             GoRoute(
               path: ':id',
@@ -162,6 +165,10 @@ final appRouter = GoRouter(
                   VehicleDetailScreen(id: state.pathParameters['id']!),
             ),
           ],
+        ),
+        GoRoute(
+          path: '/inspection-due',
+          builder: (context, state) => const DueInspectionsScreen(),
         ),
         GoRoute(
           path: '/analysis',
@@ -172,6 +179,8 @@ final appRouter = GoRouter(
           builder: (context, state) => RecordsScreen(
             key: ValueKey(state.uri.toString()),
             thisMonth: state.uri.queryParameters['period'] == 'month',
+            showCost: state.uri.queryParameters['view'] == 'cost',
+            showPriorities: state.uri.queryParameters['view'] != 'history',
           ),
           routes: [
             GoRoute(
@@ -229,10 +238,7 @@ final appRouter = GoRouter(
         ),
         GoRoute(
           path: '/setup',
-          builder: (context, state) => SetupScreen(
-            key: ValueKey(state.uri.toString()),
-            vehicleId: state.uri.queryParameters['vehicle'],
-          ),
+          builder: (context, state) => const SetupScreen(),
         ),
         GoRoute(
           path: '/support',
@@ -305,7 +311,7 @@ class MilitaryApp extends StatelessWidget {
   const MilitaryApp({super.key});
   @override
   Widget build(BuildContext context) => MaterialApp.router(
-    title: '00 수송부',
+    title: '정비온',
     debugShowCheckedModeBanner: false,
     locale: const Locale('ko'),
     supportedLocales: const [Locale('ko')],
@@ -453,6 +459,47 @@ class _AppShellState extends ConsumerState<AppShell>
                             ),
                             child: Row(
                               children: [
+                                ListenableBuilder(
+                                  listenable: appRouter.routerDelegate,
+                                  builder: (context, _) {
+                                    final route = appRouter
+                                        .routerDelegate
+                                        .currentConfiguration
+                                        .lastOrNull;
+                                    final canGoBack =
+                                        route is ImperativeRouteMatch;
+                                    final parent = switch (widget.location) {
+                                      '/' ||
+                                      '/front-map' ||
+                                      '/records' ||
+                                      '/chat' ||
+                                      '/more' => null,
+                                      '/vision' => '/front-map',
+                                      '/entry' || '/operations' => '/records',
+                                      '/inspection-due' => '/',
+                                      final path
+                                          when path.startsWith('/vehicles/') =>
+                                        '/vehicles',
+                                      final path
+                                          when path.startsWith('/records/') =>
+                                        '/records',
+                                      _ => '/more',
+                                    };
+                                    if (!canGoBack && parent == null) {
+                                      return const SizedBox.shrink();
+                                    }
+                                    return TextButton.icon(
+                                      onPressed: canGoBack
+                                          ? () => context.pop()
+                                          : () => context.go(parent!),
+                                      icon: const Icon(
+                                        Icons.arrow_back,
+                                        size: 20,
+                                      ),
+                                      label: const Text('뒤로'),
+                                    );
+                                  },
+                                ),
                                 if (!wide)
                                   IconButton(
                                     onPressed: () =>
@@ -460,37 +507,15 @@ class _AppShellState extends ConsumerState<AppShell>
                                     icon: const Icon(Icons.menu),
                                     tooltip: '메뉴 열기',
                                   ),
-                                const Expanded(
-                                  child: Column(
-                                    mainAxisAlignment: MainAxisAlignment.center,
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        '00 수송부',
-                                        style: TextStyle(
-                                          fontSize: 16,
-                                          fontWeight: FontWeight.w800,
-                                        ),
-                                      ),
-                                      SizedBox(height: 5),
-                                      SizedBox(
-                                        width: 52,
-                                        child: Divider(
-                                          color: green,
-                                          thickness: 2,
-                                          height: 2,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
+                                const Spacer(),
                                 if (compact &&
                                     MediaQuery.textScalerOf(context)
                                             .scale(12) <=
                                         18)
                                   Text(
-                                    day(ref.watch(currentTimeProvider)),
+                                    dateTimeLabel(
+                                      ref.watch(currentTimeProvider),
+                                    ),
                                     style: const TextStyle(
                                       color: muted,
                                       fontSize: 12,
@@ -586,14 +611,14 @@ class _AppShellState extends ConsumerState<AppShell>
       ('더 보기', '/more', Icons.grid_view_outlined),
     ];
     final selectedPath = switch (widget.location) {
-      '/' => '/',
+      '/' || '/inspection-due' => '/',
       '/front-map' || '/vision' => '/front-map',
       '/records' || '/entry' || '/operations' => '/records',
       '/chat' => '/chat',
       _ => '/more',
     };
     return Material(
-      color: const Color(0xFF192A26),
+      color: const Color(0xFF171B19),
       child: SafeArea(
         child: ListView(
           padding: const EdgeInsets.fromLTRB(12, 20, 12, 12),
@@ -605,7 +630,7 @@ class _AppShellState extends ConsumerState<AppShell>
                   DesignIcon('1:135', 'img', size: 54),
                   SizedBox(height: 9),
                   Text(
-                    '정비참모부 관리단',
+                    '00 수송부',
                     textAlign: TextAlign.center,
                     style: TextStyle(
                       color: Colors.white,
@@ -614,7 +639,7 @@ class _AppShellState extends ConsumerState<AppShell>
                     ),
                   ),
                   SizedBox(height: 13),
-                  Divider(height: 1, color: Color(0xFF40544C)),
+                  Divider(height: 1, color: Color(0xFF343D37)),
                 ],
               ),
             ),
@@ -629,17 +654,13 @@ class _AppShellState extends ConsumerState<AppShell>
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(8),
                   ),
-                  leading: Icon(
-                    icon,
-                    size: 22,
-                    color: selectedPath == path ? ink : null,
-                  ),
+                  leading: Icon(icon, size: 22),
                   title: Text(label, style: const TextStyle(fontSize: 14)),
                   selected: selectedPath == path,
-                  selectedTileColor: brandAccent,
-                  selectedColor: ink,
-                  textColor: const Color(0xFFEDF4F0),
-                  iconColor: const Color(0xFFA9BEB4),
+                  selectedTileColor: const Color(0xFF213A2B),
+                  selectedColor: brandAccent,
+                  textColor: const Color(0xFFE5EBE7),
+                  iconColor: const Color(0xFFB1C0B6),
                   onTap: () {
                     scaffoldKey.currentState?.closeDrawer();
                     context.go(path);

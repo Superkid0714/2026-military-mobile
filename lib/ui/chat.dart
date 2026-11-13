@@ -354,7 +354,13 @@ class _ChatState extends ConsumerState<ChatScreen> {
   @override
   Widget build(BuildContext context) {
     final s = ref.watch(storeProvider);
-    final vehicles = s.vehicles;
+    final vehicles = [
+      ...s.activeVehicles,
+      for (final v in s.vehicles)
+        if (v.id == (vehicle ?? widget.vehicleId) &&
+            !s.activeVehicles.any((active) => active.id == v.id))
+          v,
+    ];
     if (vehicles.isEmpty) return empty('차량을 등록한 뒤 질문해 주세요.');
     vehicle ??= vehicles.any((v) => v.id == widget.vehicleId)
         ? widget.vehicleId
@@ -380,9 +386,7 @@ class _ChatState extends ConsumerState<ChatScreen> {
                   for (final v in vehicles)
                     DropdownMenuItem(
                       value: v.id,
-                      child: Text(
-                        '${vehicleLabel(v.id)} · ${modelLabel(v.model)}',
-                      ),
+                      child: Text(vehiclePickerLabel(v)),
                     ),
                 ],
                 onChanged: sending
@@ -393,6 +397,12 @@ class _ChatState extends ConsumerState<ChatScreen> {
                         error = null;
                         question.clear();
                       }),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                '${selected.year}년식 · 누적 ${number(selected.distance)} km · '
+                '정비 이력 ${s.history(selected.id).length}건',
+                style: const TextStyle(fontSize: 12, color: muted),
               ),
               const SizedBox(height: 16),
               if (replies.isEmpty && pending == null) ...[

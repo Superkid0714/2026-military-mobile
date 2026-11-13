@@ -2,7 +2,6 @@ import 'maintenance_loading.dart';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 
 import '../data/adaptive_runtime.dart';
 import '../data/local_summary.dart';
@@ -127,11 +126,7 @@ class _ManualSearchState extends ConsumerState<ManualSearchScreen> {
           if (loading) const MaintenanceLoading(detail: '설치된 책자를 확인하고 있어요.'),
           if (error != null) Text(error!),
           if (!loading && !available) ...[
-            const Text('아직 가져온 정비 책자가 없습니다. 책자 파일을 가져온 뒤 검색할 수 있습니다.'),
-            TextButton(
-              onPressed: () => context.go('/data-tools'),
-              child: const Text('책자 가져오기'),
-            ),
+            const Text('현재 검색할 수 있는 정비 책자가 없습니다.'),
           ],
           if (available) ...[
             TextField(

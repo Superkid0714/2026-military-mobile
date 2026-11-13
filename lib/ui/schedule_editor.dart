@@ -9,6 +9,7 @@ class ScheduleEditor extends StatefulWidget {
     required this.date,
     this.vehicleId,
     this.schedule,
+    this.vehicles,
     super.key,
   });
 
@@ -16,6 +17,7 @@ class ScheduleEditor extends StatefulWidget {
   final DateTime date;
   final String? vehicleId;
   final MaintenanceSchedule? schedule;
+  final List<Vehicle>? vehicles;
 
   @override
   State<ScheduleEditor> createState() => _ScheduleEditorState();
@@ -86,11 +88,12 @@ class _ScheduleEditorState extends State<ScheduleEditor> {
                 isExpanded: true,
                 decoration: const InputDecoration(labelText: '차량'),
                 items: [
-                  for (final item in widget.store.vehicles)
+                  for (final item in widget.vehicles ?? widget.store.vehicles)
                     DropdownMenuItem(
                       value: item.id,
                       child: Text(
                         '${vehicleLabel(item.id)} · ${modelLabel(item.model)}',
+                        overflow: TextOverflow.ellipsis,
                       ),
                     ),
                 ],
