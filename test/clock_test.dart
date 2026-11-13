@@ -18,6 +18,20 @@ void main() {
     container.dispose();
   });
 
+  testWidgets('분이 바뀌면 실행 중인 화면의 시간을 갱신한다', (tester) async {
+    var now = DateTime(2026, 11, 14, 10, 29, 59);
+    final container = ProviderContainer(
+      overrides: [wallClockProvider.overrideWithValue(() => now)],
+    );
+    final subscription = container.listen(currentTimeProvider, (_, _) {});
+    expect(container.read(currentTimeProvider).minute, 29);
+    now = DateTime(2026, 11, 14, 10, 30);
+    await tester.pump(const Duration(seconds: 1));
+    expect(container.read(currentTimeProvider), now);
+    subscription.close();
+    container.dispose();
+  });
+
   testWidgets('백그라운드에서 날짜가 바뀌어도 복귀할 때 갱신한다', (tester) async {
     var now = DateTime(2026, 11, 3, 10);
     final container = ProviderContainer(

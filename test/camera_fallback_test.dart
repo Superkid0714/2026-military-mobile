@@ -151,7 +151,7 @@ void main() {
     await tester.drag(find.byType(ListView).last, const Offset(0, 3000));
     await tester.pumpAndSettle();
     await tap(tester, find.text('정비 결과 기록'));
-    expect(find.textContaining('자동 확정하지 않습니다. 후보: 시험필터'), findsOneWidget);
+    expect(find.textContaining('추천 부품: 시험필터'), findsOneWidget);
     await tap(
       tester,
       find.byWidgetPredicate(

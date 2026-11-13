@@ -250,7 +250,9 @@ void main() {
     appRouter.go('/');
     await tester.pumpAndSettle();
     final action = find.byKey(const ValueKey('resolve-maintenance-SMALL'));
-    await reveal(tester, action);
+    await reveal(tester, find.text('정비 일정'));
+    await tester.ensureVisible(action);
+    await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
     await expectLater(
       find.byType(MilitaryApp),

@@ -43,6 +43,7 @@ void main() {
         note: '',
         audioPath: audio.path,
         audioPart: '배터리',
+        marks: const [PhotoMark(.2, .3), PhotoMark(.7, .6)],
       ),
     );
     final backup = File('${directory.path}/audio.mbackup');
@@ -52,6 +53,9 @@ void main() {
     await store.restoreBackup(snapshot, directory);
     final restored = store.inspections.single;
     expect(restored.audioPart, '배터리');
+    expect(restored.marks, hasLength(2));
+    expect(restored.marks.first.x, .2);
+    expect(restored.marks.last.y, .6);
     expect(restored.audioPath, '${restored.imagePath}.m4a');
     expect(restored.audioPath, isNot(audio.path));
     expect(await File(restored.audioPath!).readAsBytes(), bytes);

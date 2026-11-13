@@ -85,7 +85,7 @@ void main() {
     });
     await tester.pumpAndSettle();
     expect(store.onboardingCompleted, isTrue);
-    expect(find.text('1. 내 차량 등록'), findsOneWidget);
+    expect(find.text('새 차량 등록'), findsOneWidget);
 
     appRouter.go('/welcome');
     await tester.pumpAndSettle();
@@ -105,7 +105,7 @@ void main() {
     });
     await tester.pumpAndSettle();
     expect(store.dashboardExampleView, isTrue);
-    expect(find.text('다음 점검'), findsOneWidget);
+    expect(find.text('정비 일정'), findsOneWidget);
     for (final title in [
       '차량 상태 지도',
       '정비 결과 기록',
@@ -115,8 +115,7 @@ void main() {
       '연간 정비계획',
       '정비 분석',
       '책자 검색',
-      '초기 설정',
-      '데이터 관리',
+      '새 차량 등록',
     ]) {
       await tester.tap(find.text('다음'));
       if (title == '책자 검색') {
@@ -129,7 +128,7 @@ void main() {
     await tester.tap(find.text('안내 마치기'));
     await tester.pumpAndSettle();
     expect(find.byType(ExampleGuide), findsNothing);
-    expect(find.text('다음 점검'), findsOneWidget);
+    expect(find.text('정비 일정'), findsOneWidget);
   });
   for (final size in [
     const Size(360, 640),

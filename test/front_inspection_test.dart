@@ -2,204 +2,87 @@ import 'dart:io';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:military_maintenance/data/adaptive_runtime.dart';
+import 'package:flutter_test/flutter_test.dart';
 import 'package:camera_platform_interface/camera_platform_interface.dart';
 import 'package:path_provider_platform_interface/path_provider_platform_interface.dart';
-import 'package:flutter_test/flutter_test.dart';
 import 'package:military_maintenance/data/front_inspection.dart';
 import 'package:military_maintenance/data/store.dart';
+import 'package:military_maintenance/data/adaptive_runtime.dart';
 import 'package:military_maintenance/main.dart';
 import 'package:military_maintenance/ui/front_inspection.dart';
 import 'package:military_maintenance/ui/inspection_display.dart';
+import 'package:military_maintenance/ui/inspection_demo.dart';
 
-import 'data_tools_test.dart' show tapWithIo;
 import 'ui_usability_test.dart' show setup, reveal, tap;
+import 'data_tools_test.dart' show tapWithIo;
 
 void main() {
-  test('인식 점수는 모델 값을 유지하고 없거나 잘못된 값을 구분한다', () {
-    Map<String, Object?> output(Object? score, {bool include = true}) => {
-      'modelId': FrontPartProposal.modelId,
-      'proposals': [
-        {
-          'part': 'hood',
-          'box': [.2, .2, .6, .6],
-          if (include) 'score': score,
-        },
-      ],
-    };
-    final found = FrontPartProposal.decode(output(.875))[FrontPart.hood]!;
-    expect(found.score, .875);
-    expect(found.scoreLabel, '인식 점수 87.5%');
-    expect(
-      FrontPartProposal.decode(
-        output(null, include: false),
-      )[FrontPart.hood]!.scoreLabel,
-      '점수 없음',
-    );
-    for (final invalid in [-.1, 1.1, double.nan, double.infinity, '90%']) {
-      expect(
-        () => FrontPartProposal.decode(output(invalid)),
-        throwsFormatException,
-      );
-    }
-    expect(
-      FrontPartProposal.decode({
-        'modelId': FrontPartProposal.modelId,
-        'proposals': [],
-      }),
-      isEmpty,
-    );
-  });
-
-  testWidgets('분석 박스가 사진 비율을 유지하고 선택한 부위를 전달한다', (tester) async {
-    final bytes = File('test/fixtures/manual_preview.jpg').readAsBytesSync();
-    FrontPart? selected;
-    await tester.pumpWidget(
-      MaterialApp(
-        home: Scaffold(
-          body: Center(
-            child: SizedBox(
-              width: 500,
-              height: 300,
-              child: DetectedPartsFrame(
-                bytes: bytes,
-                proposals: const {
-                  FrontPart.hood: FrontPartProposal(.2, .25, .6, .75),
-                },
-                onSelected: (part) => selected = part,
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-    await tester.runAsync(
-      () => Future<void>.delayed(const Duration(milliseconds: 80)),
-    );
-    await tester.pumpAndSettle();
-    final picture = tester.getRect(find.byType(Image));
-    final candidate = find.byWidgetPredicate(
-      (widget) => widget is Semantics && widget.properties.label == '보닛 위치 후보',
-    );
-    final box = tester.getRect(candidate);
-    expect(box.left, closeTo(picture.left + picture.width * .2, .1));
-    expect(box.top, closeTo(picture.top + picture.height * .25, .1));
-    expect(box.width, closeTo(picture.width * .4, .1));
-    expect(box.height, closeTo(picture.height * .5, .1));
-    await tester.tap(candidate);
-    expect(selected, FrontPart.hood);
-    expect(tester.takeException(), isNull);
-  });
-
-  test('기존 사진 기록은 읽을 수 있고 잘못된 사진 좌표는 거부한다', () {
-    expect(FrontObservation.decode(null), isEmpty);
-    for (final observation in [
-      {'status': 'checked', 'x': 1.5, 'y': .5},
-      {'status': 'review', 'x': .5},
-      {'status': 'hidden', 'x': .5, 'y': .5},
-      {'status': 'unknown'},
-    ]) {
-      expect(
-        () => FrontObservation.decode({'hood': observation}),
-        throwsFormatException,
-      );
-    }
-  });
-
-  testWidgets('차량별 최근 부위 상태와 이전 사진을 나란히 표시한다', (tester) async {
-    final store = await setup(tester, size: const Size(1280, 1000));
-    final first = store.vehicles.first;
-    final other = store.vehicles.firstWhere((v) => v.id != first.id);
-    final path = File('test/fixtures/manual_preview.jpg').absolute.path;
-
-    Inspection session(
-      String id,
-      String vehicle,
-      String created,
-      Map<FrontPart, FrontObservation> observations,
-    ) => Inspection(
-      id: id,
-      vehicleId: vehicle,
+  test('사진 마크 좌표 검증과 이전 기록 호환', () {
+    final data = Inspection(
+      id: 'VS1',
+      vehicleId: 'V1',
       area: '전면',
-      mode: '전면 점검',
-      created: created,
-      imagePath: path,
+      mode: '전체 사진 점검',
+      created: '2026-11-13T10:00:00',
+      imagePath: '/photo.png',
       note: '',
-      front: observations,
-    );
-
-    await tester.runAsync(() async {
-      await precacheImage(
-        FileImage(File(path)),
-        tester.element(find.byType(Scaffold).first),
-      );
-      await store.saveInspection(
-        session('FRONT-1', first.id, '2026-10-08T12:00:00', {
-          FrontPart.leftLamp: const FrontObservation(
-            FrontCheck.review,
-            x: .8,
-            y: .5,
-          ),
-        }),
-      );
-      await store.saveInspection(
-        session('FRONT-2', first.id, '2026-10-09T10:00:00', {
-          FrontPart.leftLamp: const FrontObservation(
-            FrontCheck.checked,
-            x: .76,
-            y: .5,
-          ),
-        }),
-      );
-      await store.saveInspection(
-        session('FRONT-3', other.id, '2026-10-09T11:00:00', {
-          FrontPart.leftLamp: const FrontObservation(FrontCheck.hidden),
-        }),
-      );
-    });
-
-    appRouter.go(frontMapUrl(first.id));
-    await tester.pump();
-    expect(find.text('왼쪽 전조등\n점검 완료'), findsOneWidget);
-    expect(find.text('앞범퍼\n미점검'), findsOneWidget);
-    await tester.tap(find.text('왼쪽 전조등\n점검 완료'));
-    await tester.pumpAndSettle();
-    expect(find.text('최근 점검 · 점검 완료'), findsOneWidget);
-    expect(find.text('이전 점검 · 추가 확인'), findsOneWidget);
-    expect(find.byType(FrontPhoto), findsNWidgets(2));
-
-    appRouter.go(frontMapUrl(other.id));
-    await tester.pumpAndSettle();
-    expect(find.text('왼쪽 전조등\n사진에서 확인 어려움'), findsOneWidget);
-    expect(find.text('왼쪽 전조등\n점검 완료'), findsNothing);
-    await tap(tester, find.text('전면 사진 찍기'));
-    expect(find.text('촬영 시작'), findsOneWidget);
-    expect(tester.takeException(), isNull);
+      marks: const [PhotoMark(.2, .3), PhotoMark(1, 0)],
+    ).toJson();
+    expect(Inspection.fromJson(data).marks[0].x, .2);
+    expect(Inspection.fromJson(Map.of(data)..remove('marks')).marks, isEmpty);
+    for (final invalid in [
+      [
+        {'x': -1, 'y': .2},
+      ],
+      [
+        {'x': double.nan, 'y': .2},
+      ],
+      List.filled(101, {'x': .2, 'y': .3}),
+    ]) {
+      expect(() => PhotoMark.decode(invalid), throwsFormatException);
+    }
   });
 
   for (final area in FrontInspectionArea.values) {
-    testWidgets('${area.label} 사진과 부위 표시를 저장하면 해당 지도가 갱신된다', (tester) async {
-      final directory = Directory.systemTemp.createTempSync(
-        'front-photo-test-',
-      );
-      final path = File('test/fixtures/manual_preview.jpg').absolute.path;
+    testWidgets('${area.label} AI 점검 시연 진입과 순차 검사를 유지한다', (tester) async {
+      final store = await setup(tester, size: const Size(1440, 1200));
+      appRouter.go(frontMapUrl(store.vehicles.first.id, area));
+      await tester.pumpAndSettle();
+      expect(find.byType(InspectionDiagram), findsOneWidget);
+      await tap(tester, find.byType(InspectionDiagram));
+      expect(find.byType(InspectionDemo), findsOneWidget);
+      expect(find.text('새 결과 따라보기'), findsNothing);
+      await tap(tester, find.text('AI 점검 시작'));
+      await tester.pump(const Duration(seconds: 13));
+      expect(find.textContaining('확인 순서'), findsOneWidget);
+      await tap(tester, find.text('점검 계속'));
+      await tester.pump(const Duration(seconds: 17));
+      expect(find.textContaining('전체 점검 종료'), findsOneWidget);
+      expect(find.text('사진·점검 기록 저장'), findsOneWidget);
+      expect(find.text('직접 촬영해서 기록'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+  }
+
+  for (final area in FrontInspectionArea.values) {
+    testWidgets('${area.label} 전체 촬영·여러 마크·삭제·저장·재조회', (tester) async {
+      final store = await setup(tester, size: const Size(1440, 1100));
+      late Directory dir;
+      late String path;
+      await tester.runAsync(() async {
+        dir = await Directory.systemTemp.createTemp('whole-photo-');
+        path = '${dir.path}/camera.jpg';
+        await File('test/fixtures/manual_preview.jpg').copy(path);
+      });
+      final oldCamera = CameraPlatform.instance;
+      final oldPaths = PathProviderPlatform.instance;
+      CameraPlatform.instance = _TestCamera(path);
+      PathProviderPlatform.instance = _TestPaths(dir.path);
       final messenger =
           TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
-      final runtimeCalls = <String>[];
-      Completer<void>? inferenceGate;
-      messenger.setMockMethodCallHandler(AndroidModelWorker.channel, (
-        call,
-      ) async {
-        runtimeCalls.add(call.method);
-        if (call.method == 'infer' && inferenceGate != null) {
-          await inferenceGate.future;
-        }
-        return switch (call.method) {
-          'modelInfo' => {
-            'optionalModels': [
-              {'modelId': FrontPartProposal.modelId, 'installed': true},
-            ],
-          },
+      messenger.setMockMethodCallHandler(
+        AndroidModelWorker.channel,
+        (call) async => switch (call.method) {
           'capabilities' => {
             'totalRamBytes': 4294967296,
             'availableRamBytes': 2147483648,
@@ -210,189 +93,94 @@ void main() {
             'lowMemory': false,
             'cameraStatus': 'available',
           },
-          'infer' => {
-            'modelId': FrontPartProposal.modelId,
-            'proposals': [
-              {
-                'part': 'hood',
-                'box': [.2, .2, .5, .6],
-              },
-            ],
-          },
+          'modelInfo' => {'optionalModels': []},
           _ => null,
-        };
-      });
-      addTearDown(() {
+        },
+      );
+      addTearDown(() async {
+        CameraPlatform.instance = oldCamera;
+        PathProviderPlatform.instance = oldPaths;
         messenger.setMockMethodCallHandler(AndroidModelWorker.channel, null);
+        await tester.runAsync(() => dir.delete(recursive: true));
       });
-      final previousCamera = CameraPlatform.instance;
-      final previousPaths = PathProviderPlatform.instance;
-      final camera = _TestCamera(path);
-      CameraPlatform.instance = camera;
-      PathProviderPlatform.instance = _TestPaths(directory.path);
-      addTearDown(() {
-        CameraPlatform.instance = previousCamera;
-        PathProviderPlatform.instance = previousPaths;
-        directory.deleteSync(recursive: true);
-      });
-
-      final store = await setup(tester, size: const Size(1280, 1000));
       final vehicle = store.vehicles.first;
-      appRouter.go(frontMapUrl(vehicle.id));
+      appRouter.go(frontMapUrl(vehicle.id, area));
       await tester.pumpAndSettle();
-      if (area == FrontInspectionArea.engineBay) {
-        await tap(tester, find.widgetWithText(ChoiceChip, '엔진룸'));
-      }
+      expect(find.text('부위별 상태'), findsNothing);
       await tap(tester, find.text(area.captureLabel));
-      final start = find.text('촬영 시작');
+      await tapWithIo(tester, find.text('촬영 시작'));
       final shutter = find.text('촬영 및 기록');
-      final capture = find.widgetWithText(FilledButton, '촬영 및 기록');
-      await reveal(tester, start);
-      await tapWithIo(
-        tester,
-        start,
-        completed: () =>
-            capture.evaluate().isNotEmpty &&
-            tester.widget<FilledButton>(capture).onPressed != null,
-      );
-      if (area == FrontInspectionArea.exterior) {
-        await tapWithIo(
-          tester,
-          find.text('화면 분석 켜기'),
-          completed: () => runtimeCalls.contains('infer'),
-        );
-        for (var i = 0; i < 30; i++) {
-          await tester.runAsync(
-            () => Future<void>.delayed(const Duration(milliseconds: 20)),
-          );
-          await tester.pump();
-          if (find.byType(DetectedPartsFrame).evaluate().isNotEmpty) break;
-        }
-        expect(find.byType(DetectedPartsFrame), findsOneWidget);
-        expect(store.inspections, isEmpty);
-        await tester.tap(find.text('화면 분석 끄기'));
-        await tester.runAsync(
-          () => Future<void>.delayed(const Duration(milliseconds: 30)),
-        );
-        await tester.pumpAndSettle();
-        expect(find.byType(DetectedPartsFrame), findsNothing);
-        expect(File(path).existsSync(), isTrue);
-      } else {
-        expect(find.text('화면 분석 켜기'), findsNothing);
-      }
       await reveal(tester, shutter);
-      expect(find.byType(CameraAlignmentFrame), findsOneWidget);
-      final guide = tester.widget<InspectionDiagram>(
-        find.byType(InspectionDiagram),
-      );
-      expect(guide.area, area);
-      expect(find.text('마지막 저장 상태'), findsOneWidget);
-      if (area == FrontInspectionArea.exterior) {
-        inferenceGate = Completer<void>();
-        final previousCalls = runtimeCalls
-            .where((call) => call == 'infer')
-            .length;
-        await tapWithIo(
-          tester,
-          find.text('화면 분석 켜기'),
-          completed: () =>
-              runtimeCalls.where((call) => call == 'infer').length >
-              previousCalls,
-        );
-      }
-      await tester.runAsync(() async {
-        final picturesBeforeCapture = camera.pictures;
-        await tester.tap(shutter);
-        if (area == FrontInspectionArea.exterior) {
-          await Future<void>.delayed(const Duration(milliseconds: 20));
-          expect(
-            camera.pictures,
-            picturesBeforeCapture,
-            reason: '분석 중에는 기록 촬영을 겹쳐 실행하지 않는다',
-          );
-          inferenceGate!.complete();
-        }
-      });
-      final images = Directory('${directory.path}/inspection_images');
-      var copied = false;
-      for (var i = 0; i < 200; i++) {
-        await tester.pump(const Duration(milliseconds: 20));
+      await tapWithIo(tester, shutter);
+      expect(find.text('사진 확인 및 기록'), findsOneWidget);
+      expect(find.textContaining('부위별'), findsNothing);
+      expect(find.text('점검 완료'), findsNothing);
+      expect(find.text('추가 확인'), findsNothing);
+      expect(find.text('사진에서 확인 어려움'), findsNothing);
+      final photo = find.byType(FrontPhoto);
+      for (var i = 0; i < 100; i++) {
         await tester.runAsync(
           () => Future<void>.delayed(const Duration(milliseconds: 20)),
         );
-        final files = images.existsSync()
-            ? images.listSync()
-            : <FileSystemEntity>[];
-        if (files.isNotEmpty && File(files.single.path).lengthSync() > 0) {
-          await tester.runAsync(
-            () => precacheImage(
-              FileImage(File(files.single.path)),
-              tester.element(find.byType(Scaffold).first),
-            ),
-          );
-          copied = true;
+        await tester.pump();
+        if (find
+            .descendant(of: photo, matching: find.byType(LayoutBuilder))
+            .evaluate()
+            .isNotEmpty)
           break;
-        }
       }
-      expect(copied, isTrue, reason: '분석 종료 후 점검 사진을 복사해야 한다');
-      await tester.pumpAndSettle();
-
-      final photo = find.byType(FrontPhoto);
+      expect(
+        find.descendant(of: photo, matching: find.byType(LayoutBuilder)),
+        findsOneWidget,
+      );
       await reveal(tester, photo);
-      if (area == FrontInspectionArea.engineBay) {
-        expect(find.text('1. 배터리'), findsOneWidget);
-        expect(find.text('1. 보닛 · 후보'), findsNothing);
-        expect(tester.widget<FrontPhoto>(photo).proposals, isEmpty);
-        await tester.tap(photo);
-        await tester.pumpAndSettle();
-        await tap(tester, find.widgetWithText(ChoiceChip, '점검 완료'));
-        await tap(tester, find.text('2. 냉각수통'));
-        await tap(tester, find.widgetWithText(ChoiceChip, '사진에서 확인 어려움'));
-      } else {
-        final candidate = find.text('1. 보닛 · 후보');
-        for (var i = 0; i < 20 && candidate.evaluate().isEmpty; i++) {
-          await tester.runAsync(
-            () => Future<void>.delayed(const Duration(milliseconds: 20)),
-          );
-          await tester.pump(const Duration(milliseconds: 20));
-        }
-        expect(candidate, findsOneWidget, reason: runtimeCalls.join(', '));
-        expect(tester.widget<FrontPhoto>(photo).observations, isEmpty);
-        expect(store.inspections, isEmpty);
-        await tap(tester, find.widgetWithText(ChoiceChip, '점검 완료'));
-        await tap(tester, find.text('3. 그릴'));
-        await reveal(tester, photo);
-        await tester.tap(photo);
-        await tester.pumpAndSettle();
-        await tap(tester, find.text('2. 왼쪽 전조등'));
-        await tap(tester, find.widgetWithText(ChoiceChip, '사진에서 확인 어려움'));
-      }
-      final save = find.text('점검 저장');
+      final bounds = tester.getRect(
+        find.descendant(of: photo, matching: find.byType(Image)).first,
+      );
+      await tester.tapAt(
+        Offset(
+          bounds.left + bounds.width * .25,
+          bounds.top + bounds.height * .3,
+        ),
+      );
+      await tester.pump();
+      await tester.tapAt(
+        Offset(
+          bounds.left + bounds.width * .7,
+          bounds.top + bounds.height * .6,
+        ),
+      );
+      await tester.pump();
+      expect(tester.widget<FrontPhoto>(photo).marks, hasLength(2));
+      await tester.tap(find.byKey(const ValueKey('photo-mark-0')));
+      await tester.pump();
+      expect(tester.widget<FrontPhoto>(photo).marks, hasLength(1));
+      await tester.enterText(
+        find.widgetWithText(TextField, '점검 메모'),
+        '1번 위치 확인',
+      );
+      final save = find.text('사진·점검 기록 저장');
       await reveal(tester, save);
       await tapWithIo(
         tester,
         save,
         completed: () => store.inspections.isNotEmpty,
       );
-      final saved = store.inspections.single;
-      expect(saved.vehicleId, vehicle.id);
-      expect(saved.area, area.recordArea);
-      expect(File(saved.imagePath).existsSync(), isTrue);
-      if (area == FrontInspectionArea.engineBay) {
-        expect(find.text('배터리\n점검 완료'), findsOneWidget);
-        expect(find.text('냉각수통\n사진에서 확인 어려움'), findsOneWidget);
-        expect(saved.front[FrontPart.battery]?.x, closeTo(.5, .05));
-        expect(saved.front[FrontPart.coolantTank]?.status, FrontCheck.hidden);
-        expect(runtimeCalls, isNot(contains('infer')));
-        await tap(tester, find.widgetWithText(ChoiceChip, '전면 외관'));
-        expect(find.text('보닛\n미점검'), findsOneWidget);
-      } else {
-        expect(find.text('보닛\n점검 완료'), findsOneWidget);
-        expect(find.text('왼쪽 전조등\n사진에서 확인 어려움'), findsOneWidget);
-        expect(saved.front[FrontPart.hood]?.x, closeTo(.35, .001));
-        expect(saved.front[FrontPart.grille]?.x, closeTo(.5, .05));
-        expect(saved.front[FrontPart.leftLamp]?.x, isNull);
-      }
+      final record = store.inspections.single;
+      expect(record.front, isEmpty);
+      expect(record.marks, hasLength(1));
+      expect(record.marks.single.x, closeTo(.7, .03));
+      expect(record.note, '1번 위치 확인');
+      expect(record.area, area.recordArea);
+      expect(find.text('점검 기록'), findsOneWidget);
+      expect(
+        tester.widget<FrontPhoto>(find.byType(FrontPhoto)).marks,
+        hasLength(1),
+      );
+      await tester.runAsync(() async {
+        expect(await File(record.imagePath).exists(), isTrue);
+      });
+      expect(tester.takeException(), isNull);
     });
   }
 }

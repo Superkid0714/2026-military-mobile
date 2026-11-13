@@ -11,8 +11,8 @@ import 'data_tools_test.dart' show tapWithIo;
 void main() {
   testWidgets('초기 설정부터 점검·교환 완료·다음 계획·사진 조회까지 연결한다', (tester) async {
     final s = await setup(tester, size: const Size(1280, 960));
-    await tap(tester, find.text('초기 설정·차량 등록'));
-    await tap(tester, find.widgetWithText(FilledButton, '차량 등록'));
+    await tap(tester, find.text('차량 등록'));
+    await tap(tester, find.widgetWithText(FilledButton, '새 차량 등록'));
     for (final e in {
       '차량번호': 'FLOW-REAL-1',
       '차종': '실사용 흐름 시험차',
@@ -28,11 +28,14 @@ void main() {
     }
     await tapWithIo(
       tester,
-      find.widgetWithText(FilledButton, '등록'),
+      find.widgetWithText(FilledButton, '차량 등록 완료'),
       completed: () => s.registeredVehicles.isNotEmpty,
     );
     expect(s.registeredVehicles.single.id, 'FLOW-REAL-1');
-    await tap(tester, find.text('정비 근거 등록'));
+    expect(find.widgetWithText(ListTile, 'FLOW-REAL-1'), findsOneWidget);
+    appRouter.go('/support?vehicle=FLOW-REAL-1');
+    await tester.pumpAndSettle();
+    await tap(tester, find.text('근거 등록'));
     for (final e in {
       '표준부품명': '엔진오일',
       '증상 설명': '교환',
@@ -47,7 +50,7 @@ void main() {
       find.widgetWithText(FilledButton, '저장'),
       completed: () => s.supportLibrary.evidence.isNotEmpty,
     );
-    await tap(tester, find.widgetWithText(OutlinedButton, '정비 주기 등록'));
+    await tap(tester, find.text('주기·교환 기준 등록'));
     for (final e in {
       '표준부품명': '엔진오일',
       '권장 정비 주기(km)': '5,000',
@@ -78,7 +81,6 @@ void main() {
         ),
       ),
     );
-    await tap(tester, find.text('차량 정비지원 시작'));
     await tap(tester, find.widgetWithText(ListTile, '엔진오일 · 2026-10-09'));
     await tap(tester, find.text('정비 기록 등록'));
     expect(
@@ -150,7 +152,7 @@ void main() {
       addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
       appRouter.go('/setup');
       await tester.pumpAndSettle();
-      await tap(tester, find.widgetWithText(FilledButton, '차량 등록'));
+      await tap(tester, find.widgetWithText(FilledButton, '새 차량 등록'));
       expect(tester.takeException(), isNull);
       await expectLater(
         find.byType(MilitaryApp),

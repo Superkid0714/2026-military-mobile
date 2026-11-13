@@ -22,7 +22,7 @@ void main() {
     await tester.runAsync(() => s.registerVehicle(registered));
     appRouter.go('/analysis');
     await tester.pumpAndSettle();
-    expect(find.text('조회 대상: 등록 차량 1대'), findsOneWidget);
+    expect(find.text('조회 대상: SCOPE-REAL'), findsOneWidget);
     final panel = find.widgetWithText(Panel, '정비 비용 상위 차량');
     await tester.ensureVisible(panel);
     await tester.pumpAndSettle();
@@ -56,8 +56,12 @@ void main() {
     ]) {
       appRouter.go(route);
       await tester.pumpAndSettle();
-      expect(find.byType(DataScopeNotice), findsWidgets, reason: route);
-      expect(find.textContaining('분석용 차량'), findsWidgets, reason: route);
+      if (route == '/ai-history') {
+        expect(find.text('전체 차량'), findsOneWidget);
+      } else {
+        expect(find.byType(DataScopeNotice), findsWidgets, reason: route);
+      }
+      expect(find.textContaining('혼합'), findsNothing, reason: route);
       expect(tester.takeException(), isNull, reason: route);
     }
     await tester.runAsync(() => s.registerVehicle(registered));
@@ -74,7 +78,7 @@ void main() {
     ]) {
       appRouter.go(route);
       await tester.pumpAndSettle();
-      expect(find.text('조회 대상: 등록 차량 1대'), findsOneWidget, reason: route);
+      expect(find.text('조회 대상: SCOPE-REAL'), findsOneWidget, reason: route);
       expect(tester.takeException(), isNull, reason: route);
     }
   });
@@ -86,7 +90,9 @@ void main() {
     appRouter.go('/vehicles');
     await tester.pumpAndSettle();
     await tap(tester, find.text('전체 차량 함께 보기'));
-    expect(find.textContaining('등록 차량 1대 · 분석용 차량 100대 혼합'), findsOneWidget);
+    await tester.drag(find.byType(ListView).last, const Offset(0, 1000));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('조회 대상: 차량 101대'), findsOneWidget);
     appRouter.go('/support?vehicle=SCOPE-REAL');
     await tester.pumpAndSettle();
     final field = find.widgetWithText(
@@ -108,6 +114,6 @@ void main() {
     );
     tester.widget<ListView>(find.byType(ListView).last).controller!.jumpTo(0);
     await tester.pumpAndSettle();
-    expect(find.text('조회 대상: 분석용 차량 1대'), findsOneWidget);
+    expect(find.text('조회 대상: ${vehicleLabel(mock.id)}'), findsOneWidget);
   });
 }
