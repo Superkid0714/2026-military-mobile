@@ -1,3 +1,5 @@
+import 'record_filters.dart';
+import '../data/clock.dart';
 import 'maintenance_loading.dart';
 
 import 'dart:io';
@@ -6,7 +8,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:go_router/go_router.dart';
 
 import '../data/store.dart';
 import 'components.dart';
@@ -40,6 +41,7 @@ class _DataToolsState extends ConsumerState<DataToolsScreen> {
   bool busy = false, preview = false;
   String? message, vehicleId;
   int operationPage = 0;
+  DateTimeRange? period;
 
   Future<void> run(Future<String?> Function() action) async {
     if (busy) return;
@@ -237,13 +239,22 @@ class _DataToolsState extends ConsumerState<DataToolsScreen> {
       vehicleId = vehicles.firstOrNull?.id;
       operationPage = 0;
     }
-    final rows = s.operations.where((r) => r['vehicleId'] == vehicleId).toList()
-      ..sort((a, b) {
-        final c = (b['created'] as String).compareTo(a['created'] as String);
-        return c != 0
-            ? c
-            : (b['_localOrder'] as int).compareTo(a['_localOrder'] as int);
-      });
+    final rows =
+        s.operations
+            .where(
+              (r) =>
+                  r['vehicleId'] == vehicleId &&
+                  recordInPeriod(r['created'] as String, period),
+            )
+            .toList()
+          ..sort((a, b) {
+            final c = (b['created'] as String).compareTo(
+              a['created'] as String,
+            );
+            return c != 0
+                ? c
+                : (b['_localOrder'] as int).compareTo(a['_localOrder'] as int);
+          });
     final pages = (rows.length / 12).ceil().clamp(1, 1000000);
     operationPage = operationPage.clamp(0, pages - 1);
     return ListView(
@@ -255,13 +266,8 @@ class _DataToolsState extends ConsumerState<DataToolsScreen> {
               : '기기 안의 기록을 백업·복원하고 운용 기록을 수정합니다.',
           scopeVehicles: vehicles,
           scopeLabel: widget.operationsOnly ? '조회 대상' : '백업 대상',
-          action: widget.operationsOnly
-              ? TextButton(
-                  onPressed: () => context.go('/records'),
-                  child: const Text('정비 기록'),
-                )
-              : null,
         ),
+        if (widget.operationsOnly) const RecordTabs(operations: true),
         if (!widget.operationsOnly && s.presentationVehicles.isNotEmpty)
           const Padding(
             padding: EdgeInsets.only(bottom: 16),
@@ -345,19 +351,43 @@ class _DataToolsState extends ConsumerState<DataToolsScreen> {
           const Text('등록된 차량이 없습니다.')
         else
           Panel(
-            title: '운용 기록 관리',
-            subtitle: '전체 기간의 운용 기록 · 정비 수정·삭제는 정비 기록 상세에서 가능합니다.',
+            title: widget.operationsOnly ? '운행 기록 조회' : '운용 기록 관리',
+            subtitle: widget.operationsOnly
+                ? '누적 계기값 기준 · ${rows.length}건'
+                : '전체 기간의 운용 기록 · 정비 수정·삭제는 정비 기록 상세에서 가능합니다.',
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 DataScopeNotice([s.vehicle(vehicleId!)]),
                 const SizedBox(height: 12),
+                if (widget.operationsOnly) ...[
+                  RecordPeriodFilter(
+                    value: period,
+                    now: ref.watch(currentTimeProvider),
+                    onChanged: (value) => setState(() {
+                      period = value;
+                      operationPage = 0;
+                    }),
+                  ),
+                  const SizedBox(height: 16),
+                ],
                 DropdownButtonFormField<String>(
+                  decoration: widget.operationsOnly
+                      ? const InputDecoration(labelText: '차량 선택')
+                      : null,
+                  isExpanded: widget.operationsOnly,
                   key: ValueKey('manage-$vehicleId'),
                   initialValue: vehicleId,
                   items: vehicles
                       .map(
-                        (v) => DropdownMenuItem(value: v.id, child: Text(v.id)),
+                        (v) => DropdownMenuItem(
+                          value: v.id,
+                          child: Text(
+                            widget.operationsOnly
+                                ? vehiclePickerLabel(v)
+                                : v.id,
+                          ),
+                        ),
                       )
                       .toList(),
                   onChanged: busy
@@ -370,6 +400,54 @@ class _DataToolsState extends ConsumerState<DataToolsScreen> {
                 const SizedBox(height: 12),
                 if (rows.isEmpty)
                   const Text('운용 기록이 없습니다.')
+                else if (widget.operationsOnly)
+                  DataGrid(
+                    minWidth: 950,
+                    columns: const [
+                      '기록 일시',
+                      '차량번호',
+                      '차종',
+                      '출고연도',
+                      '누적 거리(km)',
+                      '누적 시간(H)',
+                      '누적 유류(L)',
+                      '관리',
+                    ],
+                    rows: rows.skip(operationPage * 12).take(12).map((r) {
+                      final v = s.vehicle(r['vehicleId'] as String);
+                      return <Widget>[
+                        cell(
+                          (r['created'] as String)
+                              .replaceFirst('T', ' ')
+                              .split('.')
+                              .first,
+                        ),
+                        cell(v.id, bold: true),
+                        cell(v.model),
+                        cell('${v.year}'),
+                        cell(number(r['distance'] as num)),
+                        cell(number(r['hours'] as num)),
+                        cell(number(r['fuel'] as num)),
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            IconButton(
+                              key: ValueKey('edit-op-${r['id']}'),
+                              tooltip: '수정',
+                              onPressed: busy ? null : () => editOperation(r),
+                              icon: const Icon(Icons.edit_outlined),
+                            ),
+                            IconButton(
+                              key: ValueKey('delete-op-${r['id']}'),
+                              tooltip: '삭제',
+                              onPressed: busy ? null : () => deleteOperation(r),
+                              icon: const Icon(Icons.delete_outline),
+                            ),
+                          ],
+                        ),
+                      ];
+                    }).toList(),
+                  )
                 else
                   SingleChildScrollView(
                     scrollDirection: Axis.horizontal,
@@ -447,7 +525,7 @@ class _DataToolsState extends ConsumerState<DataToolsScreen> {
             ),
           ),
         const SizedBox(height: 16),
-        if (vehicleId != null)
+        if (!widget.operationsOnly && vehicleId != null)
           ChangeHistory(
             key: ValueKey('changes-$vehicleId'),
             store: s,

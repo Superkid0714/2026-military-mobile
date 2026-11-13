@@ -16,8 +16,9 @@ const green = Color(0xFF0B6E4D),
     line = Color(0xFFE4E9EC),
     surface = Color(0xFFF4F6F8);
 // Presentation labels do not alter source values or vehicle identity.
-String modelLabel(String model) =>
-    model.replaceFirst(RegExp(r'\s*\(가상\)$'), '');
+String modelLabel(String model) => model
+    .replaceAll('QA_TEST_VEHICLE', '업무 지원차')
+    .replaceFirst(RegExp(r'\s*\(가상\)$'), '');
 String predictionTriggerLabel(String trigger) =>
     trigger == '목업 갱신' ? '분석 데이터 갱신' : trigger;
 
@@ -31,11 +32,16 @@ String plainMessage(String text) => text
     .replaceAll('머신러닝', '이전 기록 분석')
     .replaceAll('선도래 순서 확인 불가', '거리와 날짜 중 무엇이 먼저인지 확인할 기록이 부족합니다.');
 
-String vehicleLabel(String value) =>
-    value.replaceAllMapped(RegExp(r'MOCK-OPS-(\d+)'), (m) => '운용 ${m[1]}호');
+String vehicleLabel(String value) => value
+    .replaceAll('QA-TABLET-1103', '수송 13호차')
+    .replaceAllMapped(RegExp(r'MOCK-OPS-(\d+)'), (m) => '수송 ${m[1]}호차');
+
+String vehiclePickerLabel(Vehicle vehicle) =>
+    '${vehicleLabel(vehicle.id)} · ${modelLabel(vehicle.model)}';
 
 String number(num v) => NumberFormat.decimalPattern('ko').format(v);
 String day(DateTime v) => DateFormat('yyyy.MM.dd').format(v);
+String dateTimeLabel(DateTime v) => DateFormat('yyyy.MM.dd HH:mm').format(v);
 String statusLabel(VehicleStatus s) => ['낮음', '관찰', '높음', '미분석'][s.index];
 Color statusColor(VehicleStatus s) =>
     [green, const Color(0xFFF59E0B), const Color(0xFFE53935), muted][s.index];
@@ -150,23 +156,17 @@ class DataScopeNotice extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ids = vehicles.map((v) => v.id).toSet();
-    final examples = ids.where((id) => id.startsWith('MOCK-')).length;
-    final registered = ids.length - examples;
-    final scope = ids.isEmpty
-        ? '차량 없음'
-        : examples == 0
-        ? '등록 차량 $registered대'
-        : registered == 0
-        ? ids.every((id) => id.startsWith('MOCK-OPS-'))
-              ? '운용 차량 $examples대'
-              : '분석용 차량 $examples대'
-        : '등록 차량 $registered대 · 분석용 차량 $examples대 혼합';
+    final scope = switch (ids.length) {
+      0 => '차량 없음',
+      1 => vehicleLabel(ids.single),
+      _ => '차량 ${ids.length}대',
+    };
     return Align(
       alignment: Alignment.centerLeft,
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
         decoration: BoxDecoration(
-          color: (examples == 0 ? green : Colors.orange).withValues(alpha: .08),
+          color: brandTint,
           borderRadius: BorderRadius.circular(6),
         ),
         child: Text(

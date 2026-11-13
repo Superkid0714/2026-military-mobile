@@ -98,9 +98,18 @@ class _BreakdownPainter extends CustomPainter {
 }
 
 class MaintenanceTrend extends StatelessWidget {
-  const MaintenanceTrend(this.values, {super.key});
+  const MaintenanceTrend(
+    this.values, {
+    this.series = const {},
+    this.seriesColors = const [],
+    this.plotHeight = 148,
+    super.key,
+  });
 
   final Map<String, num> values;
+  final Map<String, List<num>> series;
+  final List<Color> seriesColors;
+  final double plotHeight;
 
   @override
   Widget build(BuildContext context) {
@@ -120,11 +129,13 @@ class MaintenanceTrend extends StatelessWidget {
             child: Column(
               children: [
                 SizedBox(
-                  height: 148,
+                  height: plotHeight,
                   width: double.infinity,
                   child: CustomPaint(
                     painter: _TrendPainter(
                       entries.map((entry) => entry.value).toList(),
+                      series.values.toList(),
+                      seriesColors,
                     ),
                   ),
                 ),
@@ -165,59 +176,82 @@ class MaintenanceTrend extends StatelessWidget {
 }
 
 class _TrendPainter extends CustomPainter {
-  const _TrendPainter(this.counts);
+  const _TrendPainter(this.counts, this.series, this.colors);
 
   final List<num> counts;
+  final List<List<num>> series;
+  final List<Color> colors;
 
   @override
   void paint(Canvas canvas, Size size) {
     const top = 12.0;
     final bottom = size.height - 8;
-    final maxCount = counts.fold<num>(1, math.max);
+    final lines = series.isEmpty ? [counts] : series;
+    final maxCount = lines.expand((values) => values).fold<num>(1, math.max);
     final step = size.width / counts.length;
-    final points = [
-      for (final (index, count) in counts.indexed)
-        Offset(step * (index + .5), bottom - (bottom - top) * count / maxCount),
-    ];
     final grid = Paint()..color = line;
     for (var i = 0; i <= 4; i++) {
       final y = top + (bottom - top) * i / 4;
       canvas.drawLine(Offset(0, y), Offset(size.width, y), grid);
     }
-    final trace = Path()..addPolygon(points, false);
-    if (points.length > 1) {
-      final fill = Path.from(trace)
-        ..lineTo(points.last.dx, bottom)
-        ..lineTo(points.first.dx, bottom)
-        ..close();
-      canvas.drawPath(
-        fill,
-        Paint()
-          ..shader = LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [
-              green.withValues(alpha: .22),
-              green.withValues(alpha: .02),
-            ],
-          ).createShader(Offset.zero & size),
-      );
-      canvas.drawPath(
-        trace,
-        Paint()
-          ..color = green
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 3
-          ..strokeJoin = StrokeJoin.round,
-      );
-    }
-    for (final point in points) {
-      canvas.drawCircle(point, 5.5, Paint()..color = green);
-      canvas.drawCircle(point, 2.5, Paint()..color = Colors.white);
+    for (final (index, values) in lines.indexed) {
+      final color = index < colors.length ? colors[index] : trendColor(index);
+      final points = [
+        for (final (month, count) in values.indexed)
+          Offset(
+            step * (month + .5),
+            bottom - (bottom - top) * count / maxCount,
+          ),
+      ];
+      final trace = Path()..addPolygon(points, false);
+      if (points.length > 1 && lines.length == 1) {
+        final fill = Path.from(trace)
+          ..lineTo(points.last.dx, bottom)
+          ..lineTo(points.first.dx, bottom)
+          ..close();
+        canvas.drawPath(
+          fill,
+          Paint()
+            ..shader = LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [
+                color.withValues(alpha: .22),
+                color.withValues(alpha: .02),
+              ],
+            ).createShader(Offset.zero & size),
+        );
+      }
+      if (points.length > 1) {
+        canvas.drawPath(
+          trace,
+          Paint()
+            ..color = color
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 3
+            ..strokeJoin = StrokeJoin.round,
+        );
+      }
+      for (final point in points) {
+        canvas.drawCircle(
+          point,
+          lines.length == 1 ? 5.5 : 3.5,
+          Paint()..color = color,
+        );
+        canvas.drawCircle(point, 2.5, Paint()..color = Colors.white);
+      }
     }
   }
 
   @override
   bool shouldRepaint(_TrendPainter oldDelegate) =>
-      !listEquals(counts, oldDelegate.counts);
+      !listEquals(counts, oldDelegate.counts) ||
+      !listEquals(series, oldDelegate.series) ||
+      !listEquals(colors, oldDelegate.colors);
+}
+
+Color trendColor(int index) {
+  final colors = MaintenanceBreakdown.colors;
+  if (index < colors.length) return colors[index];
+  return HSLColor.fromAHSL(1, (index * 137.508) % 360, .64, .40).toColor();
 }

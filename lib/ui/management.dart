@@ -1,3 +1,5 @@
+import 'record_filters.dart';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -19,7 +21,8 @@ Map<String, num> _systemCounts(List<Maintenance> records) {
 }
 
 class VehiclesScreen extends ConsumerStatefulWidget {
-  const VehiclesScreen({super.key});
+  const VehiclesScreen({this.homeScope = false, super.key});
+  final bool homeScope;
   @override
   ConsumerState<VehiclesScreen> createState() => _VehiclesState();
 }
@@ -38,13 +41,12 @@ class _VehiclesState extends ConsumerState<VehiclesScreen> {
   @override
   Widget build(BuildContext context) {
     final s = ref.watch(storeProvider);
-    final filtered = (showExamples ? s.vehicles : s.activeVehicles)
+    final vehicles = widget.homeScope
+        ? s.dashboardVehicles
+        : (showExamples ? s.vehicles : s.dashboardVehicles);
+    final filtered = vehicles
         .where(
           (v) =>
-              (showExamples ||
-                  s.dashboardExampleView ||
-                  s.registeredVehicles.isEmpty ||
-                  !v.id.startsWith('MOCK-')) &&
               ('${v.id} ${vehicleLabel(v.id)} ${modelLabel(v.model)}'
                   .toLowerCase()
                   .contains(search.text.toLowerCase())) &&
@@ -57,8 +59,8 @@ class _VehiclesState extends ConsumerState<VehiclesScreen> {
           ? b.distance.compareTo(a.distance)
           : sort == '차량번호 순'
           ? a.id.compareTo(b.id)
-          : (b.predictionReady ? b.risk : -1).compareTo(
-              a.predictionReady ? a.risk : -1,
+          : ((s.predictions[b.id]?['probability'] as num?) ?? -1).compareTo(
+              (s.predictions[a.id]?['probability'] as num?) ?? -1,
             ),
     );
     final start = (page * 8).clamp(0, filtered.length);
@@ -73,9 +75,9 @@ class _VehiclesState extends ConsumerState<VehiclesScreen> {
             child: const Text('차량 등록'),
           ),
         ),
-        SummaryCards(s.activeVehicles),
+        SummaryCards(vehicles),
         const SizedBox(height: 16),
-        if (s.registeredVehicles.isNotEmpty)
+        if (!widget.homeScope && s.registeredVehicles.isNotEmpty)
           CheckboxListTile(
             value: showExamples,
             title: const Text('전체 차량 함께 보기'),
@@ -106,13 +108,58 @@ class _VehiclesState extends ConsumerState<VehiclesScreen> {
                   ),
                 ),
               ),
-              _dropdown(
-                status,
-                ['전체', '낮음', '관찰', '높음', '미분석'],
-                (v) => setState(() {
-                  status = v;
-                  page = 0;
-                }),
+              SizedBox(
+                width: double.infinity,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'AI 분석 상태',
+                      style: TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        for (final label in ['전체', '낮음', '관찰', '높음', '미분석'])
+                          ChoiceChip(
+                            key: ValueKey('vehicle-status-$label'),
+                            label: Text(
+                              '$label · ${vehicles.where((v) => label == '전체' || statusLabel(v.status) == label).length}대',
+                            ),
+                            avatar: label == '전체'
+                                ? const Icon(
+                                    Icons.directions_car_outlined,
+                                    size: 18,
+                                  )
+                                : Icon(
+                                    label == '높음'
+                                        ? Icons.warning_amber_rounded
+                                        : label == '관찰'
+                                        ? Icons.visibility_outlined
+                                        : label == '낮음'
+                                        ? Icons.check_circle_outline
+                                        : Icons.pending_outlined,
+                                    size: 18,
+                                    color: label == '높음'
+                                        ? const Color(0xFFB23D30)
+                                        : label == '관찰'
+                                        ? const Color(0xFF925200)
+                                        : label == '낮음'
+                                        ? green
+                                        : muted,
+                                  ),
+                            selected: status == label,
+                            onSelected: (_) => setState(() {
+                              status = label;
+                              page = 0;
+                            }),
+                          ),
+                      ],
+                    ),
+                  ],
+                ),
               ),
               _dropdown(
                 year,
@@ -183,7 +230,11 @@ class _VehiclesState extends ConsumerState<VehiclesScreen> {
                           children: [
                             Expanded(
                               child: LinearProgressIndicator(
-                                value: v.predictionReady ? v.risk / 100 : 0,
+                                value: v.predictionReady
+                                    ? (s.predictions[v.id]!['probability']
+                                              as num)
+                                          .toDouble()
+                                    : 0,
                                 color: statusColor(v.status),
                                 backgroundColor: line,
                                 minHeight: 5,
@@ -191,7 +242,9 @@ class _VehiclesState extends ConsumerState<VehiclesScreen> {
                             ),
                             const SizedBox(width: 6),
                             cell(
-                              v.predictionReady ? '${v.risk}%' : '—',
+                              v.predictionReady
+                                  ? '${((s.predictions[v.id]!['probability'] as num) * 100).toStringAsFixed(1)}%'
+                                  : '—',
                               color: statusColor(v.status),
                             ),
                           ],
@@ -468,8 +521,13 @@ Widget _recordTable(BuildContext context, List<Maintenance> records) =>
       );
 
 class RecordsScreen extends ConsumerStatefulWidget {
-  const RecordsScreen({this.thisMonth = false, super.key});
-  final bool thisMonth;
+  const RecordsScreen({
+    this.thisMonth = false,
+    this.showCost = false,
+    this.showPriorities = true,
+    super.key,
+  });
+  final bool thisMonth, showCost, showPriorities;
   @override
   ConsumerState<RecordsScreen> createState() => _RecordsState();
 }
@@ -477,7 +535,8 @@ class RecordsScreen extends ConsumerStatefulWidget {
 class _RecordsState extends ConsumerState<RecordsScreen> {
   final search = TextEditingController();
   String vehicle = '전체', system = '전체';
-  bool newest = true;
+  late bool newest = !widget.showCost;
+  DateTimeRange? period;
   bool initialized = false;
   int page = 0;
   static const pageSize = 12;
@@ -493,14 +552,23 @@ class _RecordsState extends ConsumerState<RecordsScreen> {
     if (!initialized) {
       final value = GoRouterState.of(context).uri.queryParameters['vehicle'];
       if (s.vehicles.any((v) => v.id == value)) vehicle = value!;
+      if (widget.thisMonth) {
+        final now = ref.read(currentTimeProvider);
+        period = DateTimeRange(
+          start: DateTime(now.year, now.month),
+          end: DateTime(now.year, now.month, now.day),
+        );
+      }
       initialized = true;
     }
     final now = ref.watch(currentTimeProvider);
-    final monthStart = DateTime(now.year, now.month);
-    final monthEnd = DateTime(now.year, now.month, now.day + 1);
+
     final priorityVehicles = vehicle == '전체'
         ? s.dashboardVehicles
         : [s.vehicle(vehicle)];
+    final recordVehicles = widget.thisMonth
+        ? s.dashboardVehicles
+        : s.activeVehicles;
     final priorities =
         [
           if (widget.thisMonth)
@@ -519,12 +587,9 @@ class _RecordsState extends ConsumerState<RecordsScreen> {
         .where(
           (r) =>
               (vehicle == '전체'
-                  ? (widget.thisMonth ? s.dashboardVehicles : s.activeVehicles)
-                        .any((v) => v.id == r.vehicleId)
+                  ? recordVehicles.any((v) => v.id == r.vehicleId)
                   : r.vehicleId == vehicle) &&
-              (!widget.thisMonth ||
-                  (!DateTime.parse(r.date).isBefore(monthStart) &&
-                      DateTime.parse(r.date).isBefore(monthEnd))) &&
+              recordInPeriod(r.date, period) &&
               (system == '전체' || r.system == system) &&
               '${r.vehicleId} ${vehicleLabel(r.vehicleId)} ${r.part} ${maintenanceDescriptionLabel(r)}'
                   .contains(search.text),
@@ -539,7 +604,7 @@ class _RecordsState extends ConsumerState<RecordsScreen> {
     return ListView(
       children: [
         PageTitle(
-          widget.thisMonth ? '이번 달 정비' : '정비 기록',
+          widget.showCost ? '이번 달 비용' : '정비 기록',
           '지난 작업을 찾아보거나 새 기록을 남기세요.',
           scopeVehicles: vehicle == '전체'
               ? (widget.thisMonth ? s.dashboardVehicles : s.activeVehicles)
@@ -549,26 +614,17 @@ class _RecordsState extends ConsumerState<RecordsScreen> {
             child: const Text('기록 쓰기'),
           ),
         ),
-        Wrap(
-          spacing: 8,
-          children: [
-            TextButton(
-              onPressed: widget.thisMonth ? () => context.go('/records') : null,
-              child: const Text('전체 정비 기록'),
+        const RecordTabs(operations: false),
+        if (widget.showCost)
+          Panel(
+            title: '정비 비용 합계',
+            subtitle: '현재 조회 조건 · ${rows.length}건',
+            child: Text(
+              '${number(rows.fold<int>(0, (total, record) => total + record.cost))}원',
+              style: Theme.of(context).textTheme.headlineSmall,
             ),
-            TextButton(
-              onPressed: widget.thisMonth
-                  ? null
-                  : () => context.go('/records?period=month'),
-              child: const Text('이번 달 정비'),
-            ),
-            TextButton(
-              onPressed: () => context.go('/operations'),
-              child: const Text('운행 기록'),
-            ),
-          ],
-        ),
-        if (widget.thisMonth)
+          ),
+        if (widget.thisMonth && !widget.showCost && widget.showPriorities)
           Panel(
             title: '우선 점검',
             child: priorities.isEmpty
@@ -588,57 +644,72 @@ class _RecordsState extends ConsumerState<RecordsScreen> {
           ),
         Panel(
           title: '검색 및 필터',
-          child: Wrap(
-            spacing: 12,
-            runSpacing: 12,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              SizedBox(
-                width: 300,
-                child: TextField(
-                  controller: search,
-                  onChanged: (_) => setState(() => page = 0),
-                  decoration: const InputDecoration(
-                    hintText: '차량번호, 부품명, 정비 내용 검색',
-                    prefixIcon: Padding(
-                      padding: EdgeInsets.all(14),
-                      child: DesignIcon('1:1346', 'imgSearch'),
+              RecordPeriodFilter(
+                value: period,
+                now: now,
+                onChanged: (value) => setState(() {
+                  period = value;
+                  page = 0;
+                }),
+              ),
+              const SizedBox(height: 16),
+              Wrap(
+                spacing: 12,
+                runSpacing: 12,
+                children: [
+                  SizedBox(
+                    width: 300,
+                    child: TextField(
+                      controller: search,
+                      onChanged: (_) => setState(() => page = 0),
+                      decoration: const InputDecoration(
+                        hintText: '차량번호, 부품명, 정비 내용 검색',
+                        prefixIcon: Padding(
+                          padding: EdgeInsets.all(14),
+                          child: DesignIcon('1:1346', 'imgSearch'),
+                        ),
+                      ),
                     ),
                   ),
-                ),
-              ),
-              _dropdown(
-                vehicle,
-                ['전체', ...s.vehicles.map((v) => v.id)],
-                (v) => setState(() {
-                  vehicle = v;
-                  page = 0;
-                }),
-              ),
-              _dropdown(
-                system,
-                ['전체', ...s.records.map((r) => r.system).toSet()],
-                (v) => setState(() {
-                  system = v;
-                  page = 0;
-                }),
-              ),
-              _dropdown(
-                newest ? '최신 정비일 순' : '가격 높은 순',
-                ['최신 정비일 순', '가격 높은 순'],
-                (v) => setState(() {
-                  newest = v == '최신 정비일 순';
-                  page = 0;
-                }),
-              ),
-              OutlinedButton(
-                onPressed: () => setState(() {
-                  search.clear();
-                  vehicle = '전체';
-                  system = '전체';
-                  newest = true;
-                  page = 0;
-                }),
-                child: const Text('필터 초기화'),
+                  _dropdown(
+                    vehicle,
+                    ['전체', ...s.vehicles.map((v) => v.id)],
+                    (v) => setState(() {
+                      vehicle = v;
+                      page = 0;
+                    }),
+                  ),
+                  _dropdown(
+                    system,
+                    ['전체', ...s.records.map((r) => r.system).toSet()],
+                    (v) => setState(() {
+                      system = v;
+                      page = 0;
+                    }),
+                  ),
+                  _dropdown(
+                    newest ? '최신 정비일 순' : '가격 높은 순',
+                    ['최신 정비일 순', '가격 높은 순'],
+                    (v) => setState(() {
+                      newest = v == '최신 정비일 순';
+                      page = 0;
+                    }),
+                  ),
+                  OutlinedButton(
+                    onPressed: () => setState(() {
+                      period = null;
+                      search.clear();
+                      vehicle = '전체';
+                      system = '전체';
+                      newest = true;
+                      page = 0;
+                    }),
+                    child: const Text('필터 초기화'),
+                  ),
+                ],
               ),
             ],
           ),
@@ -1050,12 +1121,78 @@ class _AiHistoryState extends ConsumerState<AiHistoryScreen> {
     final s = ref.watch(storeProvider);
     selected ??= s.vehicles.any((v) => v.id == widget.vehicleId)
         ? widget.vehicleId
-        : s.activeVehicles.first.id;
+        : null;
+    if (selected == null) {
+      final fleet = s.dashboardVehicles;
+      final ranked = [...fleet]
+        ..sort(
+          (a, b) => (b.predictionReady ? b.risk : -1).compareTo(
+            a.predictionReady ? a.risk : -1,
+          ),
+        );
+      return ListView(
+        key: const ValueKey('analysis-all'),
+        children: [
+          const PageTitle('분석 이력', '전체 차량의 예측 결과와 점검 기록'),
+          Panel(
+            title: '조회 차량',
+            child: DropdownButtonFormField<String>(
+              initialValue: '',
+              isExpanded: true,
+              items: [
+                const DropdownMenuItem(value: '', child: Text('전체 차량')),
+                for (final vehicle in fleet)
+                  DropdownMenuItem(
+                    value: vehicle.id,
+                    child: Text(vehiclePickerLabel(vehicle)),
+                  ),
+              ],
+              onChanged: (value) =>
+                  setState(() => selected = value == '' ? null : value),
+            ),
+          ),
+          const SizedBox(height: 16),
+          SummaryCards(fleet),
+          const SizedBox(height: 16),
+          Panel(
+            title: '차량별 분석 현황',
+            child: Column(
+              children: [
+                for (final vehicle in ranked)
+                  ListTile(
+                    title: Text(
+                      vehicleLabel(vehicle.id),
+                      style: const TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                    subtitle: Text(
+                      '${modelLabel(vehicle.model)} · 정비 ${s.history(vehicle.id).length}건'
+                      ' · 사진 점검 ${s.inspections.where((item) => item.vehicleId == vehicle.id).length}건',
+                    ),
+                    trailing: Text(
+                      vehicle.predictionReady
+                          ? '${((s.predictions[vehicle.id]!['probability'] as num) * 100).toStringAsFixed(1)}%'
+                          : '예측 없음',
+                      style: TextStyle(
+                        color: vehicle.predictionReady
+                            ? statusColor(vehicle.status)
+                            : muted,
+                      ),
+                    ),
+                    onTap: () => setState(() => selected = vehicle.id),
+                  ),
+                if (ranked.isEmpty) const Text('등록한 차량이 없습니다.'),
+              ],
+            ),
+          ),
+        ],
+      );
+    }
     final v = s.vehicle(selected!);
     final sessions = s.inspections
         .where((i) => i.vehicleId == selected)
         .toList();
     return ListView(
+      key: ValueKey('analysis-vehicle-$selected'),
       children: [
         PageTitle(
           '지난 분석 결과',
@@ -1070,10 +1207,32 @@ class _AiHistoryState extends ConsumerState<AiHistoryScreen> {
             runSpacing: 12,
             crossAxisAlignment: WrapCrossAlignment.center,
             children: [
-              _dropdown(
-                selected!,
-                s.vehicles.map((v) => v.id).toList(),
-                (value) => setState(() => selected = value),
+              SizedBox(
+                width: 280,
+                child: DropdownButtonFormField<String>(
+                  key: ValueKey(selected),
+                  initialValue: selected,
+                  isExpanded: true,
+                  items: [
+                    const DropdownMenuItem(value: '', child: Text('전체 차량')),
+                    for (final vehicle in s.vehicles)
+                      DropdownMenuItem(
+                        value: vehicle.id,
+                        child: Text(vehiclePickerLabel(vehicle)),
+                      ),
+                  ],
+                  onChanged: (value) {
+                    if (value == '') {
+                      if (widget.vehicleId != null) {
+                        context.go('/ai-history');
+                      } else {
+                        setState(() => selected = null);
+                      }
+                    } else {
+                      setState(() => selected = value);
+                    }
+                  },
+                ),
               ),
               StatusBadge(v.status),
               cell(
@@ -1109,7 +1268,7 @@ class _AiHistoryState extends ConsumerState<AiHistoryScreen> {
         const SizedBox(height: 16),
         Panel(
           title: '이전 분석 결과',
-          subtitle: '이번 달은 기록이 추가되면 점수가 바뀝니다.',
+          subtitle: '다음 달 고장수리 발생 가능성 · 월중 기록은 잠정값입니다.',
           child:
               s.predictionHistory
                   .where((r) => r['vehicleId'] == selected)
