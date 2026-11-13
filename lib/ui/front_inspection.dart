@@ -1,6 +1,8 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -8,10 +10,9 @@ import '../data/front_inspection.dart';
 import '../data/store.dart';
 import '../data/local_vision.dart';
 import 'components.dart';
-import 'inspection_display.dart';
 import 'inspection_audio.dart';
-import 'support.dart';
-import 'field_work.dart';
+import 'inspection_display.dart';
+import 'inspection_part_card.dart';
 
 String frontMapUrl([
   String? vehicle,
@@ -35,12 +36,16 @@ class FrontPhoto extends StatelessWidget {
     required this.path,
     required this.observations,
     this.onMark,
+    this.marks = const [],
+    this.onRemoveMark,
     this.vehicleDetection,
     this.proposals = const {},
     super.key,
   });
 
   final String path;
+  final List<PhotoMark> marks;
+  final ValueChanged<int>? onRemoveMark;
   final Map<FrontPart, FrontObservation> observations;
   final ValueChanged<Offset>? onMark;
   final VisionDetection? vehicleDetection;
@@ -60,12 +65,8 @@ class FrontPhoto extends StatelessWidget {
           child: Text('사진을 열 수 없습니다.'),
         ),
         frameBuilder: (context, image, frame, _) {
-          if (frame == null) {
-            return const SizedBox(
-              height: 180,
-              child: Center(child: CircularProgressIndicator()),
-            );
-          }
+          // Keep Image's own error widget visible when loading fails.
+          if (frame == null) return image;
           return Stack(
             children: [
               image,
@@ -139,6 +140,48 @@ class FrontPhoto extends StatelessWidget {
                                 ),
                               ),
                             ),
+                        for (final (index, mark) in marks.indexed)
+                          Positioned(
+                            left: (mark.x * size.maxWidth - 20).clamp(
+                              0.0,
+                              (size.maxWidth - 40).clamp(0.0, double.infinity),
+                            ),
+                            top: (mark.y * size.maxHeight - 20).clamp(
+                              0.0,
+                              (size.maxHeight - 40).clamp(0.0, double.infinity),
+                            ),
+                            child: SizedBox(
+                              width: 40,
+                              height: 40,
+                              child: IconButton.filled(
+                                key: ValueKey('photo-mark-$index'),
+                                tooltip: onRemoveMark == null
+                                    ? '마크 ${index + 1}'
+                                    : '마크 ${index + 1} 삭제',
+                                style: IconButton.styleFrom(
+                                  backgroundColor: const Color(0xFFFFC56D),
+                                  foregroundColor: Colors.black,
+                                  disabledBackgroundColor: const Color(
+                                    0xFFFFC56D,
+                                  ),
+                                  disabledForegroundColor: Colors.black,
+                                  side: const BorderSide(
+                                    color: Colors.white,
+                                    width: 2,
+                                  ),
+                                ),
+                                onPressed: onRemoveMark == null
+                                    ? null
+                                    : () => onRemoveMark!(index),
+                                icon: Text(
+                                  '${index + 1}',
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w800,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
                         for (final entry in observations.entries)
                           if (entry.value.x != null && entry.value.y != null)
                             Positioned(
@@ -202,12 +245,18 @@ class FrontMapScreen extends ConsumerStatefulWidget {
 class _FrontMapState extends ConsumerState<FrontMapScreen> {
   String? vehicleId;
   late FrontInspectionArea area = widget.initialArea;
-  late FrontPart part = area.parts.first;
+  late FrontPart selectedPart = area.parts.first;
 
   @override
   Widget build(BuildContext context) {
     final store = ref.watch(storeProvider);
-    final vehicles = store.vehicles;
+    final vehicles = [
+      ...store.activeVehicles,
+      for (final v in store.vehicles)
+        if (v.id == (vehicleId ?? widget.vehicleId) &&
+            !store.activeVehicles.any((active) => active.id == v.id))
+          v,
+    ];
     final vehicle =
         vehicles
             .where((v) => v.id == (vehicleId ?? widget.vehicleId))
@@ -216,40 +265,16 @@ class _FrontMapState extends ConsumerState<FrontMapScreen> {
         vehicles.firstOrNull;
     if (vehicle == null) return empty('차량을 등록한 뒤 사진 점검을 시작해 주세요.');
 
-    final sessions =
+    final history =
         store.inspections
-            .where((i) => i.vehicleId == vehicle.id && i.front.isNotEmpty)
+            .where(
+              (i) =>
+                  i.vehicleId == vehicle.id &&
+                  (i.area == area.recordArea ||
+                      i.front.keys.any(area.parts.contains)),
+            )
             .toList()
           ..sort((a, b) => b.created.compareTo(a.created));
-    final latest = latestInspectionParts(sessions);
-    final history = sessions.where((i) => i.front.containsKey(part)).toList();
-
-    Widget partButton(FrontPart target) {
-      final status = latest[target]?.status;
-      final selected = part == target;
-      return Semantics(
-        selected: selected,
-        child: OutlinedButton.icon(
-          icon: Text(
-            '${target.number}',
-            style: const TextStyle(fontWeight: FontWeight.w800),
-          ),
-          style: OutlinedButton.styleFrom(
-            minimumSize: const Size(0, 48),
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            foregroundColor: _statusColor(status),
-            backgroundColor: selected
-                ? Theme.of(context).colorScheme.primaryContainer
-                : Colors.white,
-          ),
-          onPressed: () => setState(() => part = target),
-          label: Text(
-            '${target.label}\n${status?.label ?? '미점검'}',
-            textAlign: TextAlign.center,
-          ),
-        ),
-      );
-    }
 
     return ListView(
       children: [
@@ -268,9 +293,7 @@ class _FrontMapState extends ConsumerState<FrontMapScreen> {
                   for (final v in vehicles)
                     DropdownMenuItem(
                       value: v.id,
-                      child: Text(
-                        '${vehicleLabel(v.id)} · ${modelLabel(v.model)}',
-                      ),
+                      child: Text(vehiclePickerLabel(v)),
                     ),
                 ],
                 onChanged: (value) => setState(() => vehicleId = value),
@@ -286,7 +309,7 @@ class _FrontMapState extends ConsumerState<FrontMapScreen> {
                       selected: area == item,
                       onSelected: (_) => setState(() {
                         area = item;
-                        part = item.parts.first;
+                        selectedPart = item.parts.first;
                       }),
                     ),
                 ],
@@ -302,7 +325,6 @@ class _FrontMapState extends ConsumerState<FrontMapScreen> {
                         'vehicle': vehicle.id,
                         'front': '1',
                         'area': area.name,
-                        'part': part.name,
                       },
                     ).toString(),
                   ),
@@ -312,69 +334,84 @@ class _FrontMapState extends ConsumerState<FrontMapScreen> {
               ),
               const SizedBox(height: 16),
               const Text(
-                '부위별 상태',
+                'AI 점검',
                 style: TextStyle(fontWeight: FontWeight.w800),
               ),
-              if (area == FrontInspectionArea.exterior)
-                const Text('좌우는 운전석에서 앞을 볼 때 기준입니다.'),
               const SizedBox(height: 8),
               ResponsiveColumns(
                 breakpoint: 690,
                 children: [
                   InspectionDiagram(
                     area: area,
-                    observations: latest,
-                    selected: part,
+                    observations: latestInspectionParts(history),
+                    selected: selectedPart,
+                    onSave: (observations, memo) async {
+                      final asset = area == FrontInspectionArea.engineBay
+                          ? 'assets/branding/military-engine-bay.png'
+                          : 'assets/branding/military-front-reference.png';
+                      final bytes = await rootBundle.load(asset);
+                      final directory =
+                          await getApplicationDocumentsDirectory();
+                      final folder = Directory(
+                        '${directory.path}/inspection_images',
+                      );
+                      await folder.create(recursive: true);
+                      final id = store.newId('VS');
+                      final photo = File('${folder.path}/$id.png');
+                      await photo.writeAsBytes(
+                        bytes.buffer.asUint8List(
+                          bytes.offsetInBytes,
+                          bytes.lengthInBytes,
+                        ),
+                        flush: true,
+                      );
+                      try {
+                        await store.saveInspection(
+                          Inspection(
+                            id: id,
+                            vehicleId: vehicle.id,
+                            area: area.recordArea,
+                            mode: '디지털 트윈 시연',
+                            created: store.clock().toIso8601String(),
+                            imagePath: photo.path,
+                            note: memo,
+                            front: observations,
+                          ),
+                        );
+                      } catch (_) {
+                        if (await photo.exists()) await photo.delete();
+                        rethrow;
+                      }
+                    },
+                    onCapture: () {
+                      Navigator.of(context, rootNavigator: true).pop();
+                      context.push(
+                        Uri(
+                          path: '/vision',
+                          queryParameters: {
+                            'vehicle': vehicle.id,
+                            'front': '1',
+                            'area': area.name,
+                          },
+                        ).toString(),
+                      );
+                    },
                   ),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: [for (final item in area.parts) partButton(item)],
-                  ),
-                ],
-              ),
-              const SizedBox(height: 16),
-              Text(
-                part.label,
-                style: const TextStyle(fontWeight: FontWeight.w700),
-              ),
-              const SizedBox(height: 6),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: [
-                  OutlinedButton(
-                    onPressed: () => context.push(
-                      Uri(
-                        path: '/manual-search',
-                        queryParameters: {'query': part.searchTerm},
-                      ).toString(),
-                    ),
-                    child: const Text('관련 책자'),
-                  ),
-                  OutlinedButton(
-                    onPressed: () =>
-                        context.push(supportUrl(vehicle.id, part.searchTerm)),
-                    child: const Text('수리 기록'),
-                  ),
-                  OutlinedButton(
-                    onPressed: () => showFieldWorkEditor(
-                      context,
-                      store,
-                      vehicleId: vehicle.id,
-                      part: part.label,
-                    ),
-                    child: const Text('부속 요청'),
-                  ),
-                  TextButton(
-                    onPressed: () => showFieldWorkEditor(
-                      context,
-                      store,
-                      kind: FieldWorkKind.feedback,
-                      vehicleId: vehicle.id,
-                      part: part.label,
-                    ),
-                    child: const Text('인식 오류 제보'),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      for (final part in area.parts)
+                        InspectionPartCard(
+                          part: part,
+                          status:
+                              latestInspectionParts(
+                                history,
+                              )[part]?.status.label ??
+                              '미점검',
+                          selected: selectedPart == part,
+                          onTap: () => setState(() => selectedPart = part),
+                        ),
+                    ],
                   ),
                 ],
               ),
@@ -383,7 +420,7 @@ class _FrontMapState extends ConsumerState<FrontMapScreen> {
         ),
         const SizedBox(height: 16),
         Panel(
-          title: '${part.label} 점검 기록',
+          title: '점검 기록',
           child: history.isEmpty
               ? empty('점검 기록이 없습니다.')
               : ResponsiveColumns(
@@ -393,8 +430,7 @@ class _FrontMapState extends ConsumerState<FrontMapScreen> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            '${index == 0 ? '최근 점검' : '이전 점검'} · '
-                            '${inspection.front[part]!.status.label}',
+                            '${index == 0 ? '최근 점검' : '이전 점검'} · 마크 ${inspection.displayMarks.length}개',
                             style: const TextStyle(fontWeight: FontWeight.bold),
                           ),
                           Text(
@@ -406,7 +442,8 @@ class _FrontMapState extends ConsumerState<FrontMapScreen> {
                           const SizedBox(height: 8),
                           FrontPhoto(
                             path: inspection.imagePath,
-                            observations: {part: inspection.front[part]!},
+                            observations: const {},
+                            marks: inspection.displayMarks,
                           ),
                           if (inspection.note.isNotEmpty) Text(inspection.note),
                           if (inspection.audioPath case final path?)

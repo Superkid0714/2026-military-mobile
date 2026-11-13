@@ -49,7 +49,7 @@ class _VisionState extends ConsumerState<VisionScreen>
   Future<void> recordAudio() async {
     final path = imagePath;
     if (path == null || saving || recording) return;
-    final part = widget.front ? frontPart.label : standardPart(area);
+    final part = widget.front ? '전체 사진' : standardPart(area);
     setState(() => recording = true);
     try {
       final audio = await inspectionAudioChannel.invokeMethod<String>(
@@ -133,6 +133,7 @@ class _VisionState extends ConsumerState<VisionScreen>
   bool cameraStarting = false, resumeCamera = false;
   final annotation = TextEditingController();
   final frontObservations = <FrontPart, FrontObservation>{};
+  final photoMarks = <PhotoMark>[];
   late FrontPart frontPart;
   bool get engineBay => widget.inspectionArea == FrontInspectionArea.engineBay;
   String? draftId;
@@ -512,6 +513,7 @@ class _VisionState extends ConsumerState<VisionScreen>
           imagePath = path;
           draftId = null;
           frontObservations.clear();
+          photoMarks.clear();
           frontProposals = const {};
           frontProposalMessage = null;
           findingParts = false;
@@ -519,9 +521,6 @@ class _VisionState extends ConsumerState<VisionScreen>
           vehicleDetectionMessage = null;
           step = 3;
         });
-        if (widget.inspectionArea == FrontInspectionArea.exterior) {
-          unawaited(findFrontParts(path));
-        }
       } else {
         await _deleteDraftPhoto(path);
       }
@@ -541,8 +540,7 @@ class _VisionState extends ConsumerState<VisionScreen>
         vehicle == null ||
         saving ||
         recording ||
-        findingVehicle ||
-        (widget.front && frontObservations.isEmpty)) {
+        findingVehicle) {
       return;
     }
     setState(() => saving = true);
@@ -554,13 +552,13 @@ class _VisionState extends ConsumerState<VisionScreen>
           id: id,
           vehicleId: vehicle!,
           area: area,
-          mode: mode,
+          mode: widget.front ? '전체 사진 점검' : mode,
           created: s.clock().toIso8601String(),
           imagePath: imagePath!,
           audioPath: audioPath,
           audioPart: audioPart,
           note: annotation.text.trim(),
-          front: Map.of(frontObservations),
+          marks: List.of(photoMarks),
         ),
       );
       audioSaved = true;
@@ -612,11 +610,11 @@ class _VisionState extends ConsumerState<VisionScreen>
                   mode,
                   '1. 차량 확인',
                   engineBay ? '2. 엔진룸 촬영' : '2. 전면 촬영',
-                  '3. 부위별 점검',
+                  '3. 사진 마크·메모',
                   '사진 기록',
                 ][step]
               : ['사진 점검', '대상 지정', '실시간 촬영', '촬영 결과', '사진 기록'][step],
-          widget.front && step == 3 ? '부위 선택 → 사진에 표시 → 결과 선택' : '',
+          widget.front && step == 3 ? '사진에 마크 추가 → 메모 작성 → 저장' : '',
           scopeVehicles: [s.vehicle(vehicle!)],
           action: step == 0
               ? TextButton(
@@ -641,9 +639,7 @@ class _VisionState extends ConsumerState<VisionScreen>
                       .map(
                         (v) => DropdownMenuItem(
                           value: v.id,
-                          child: Text(
-                            '${vehicleLabel(v.id)} · ${modelLabel(v.model)}',
-                          ),
+                          child: Text(vehiclePickerLabel(v)),
                         ),
                       )
                       .toList(),
@@ -691,7 +687,7 @@ class _VisionState extends ConsumerState<VisionScreen>
         else if (step == 2)
           _live(s)
         else if (step == 3)
-          (widget.front ? _frontResult() : _result())
+          _frontResult()
         else
           _sessions(s),
       ],
@@ -750,7 +746,7 @@ class _VisionState extends ConsumerState<VisionScreen>
       children: [
         if (widget.front)
           Text(
-            '${vehicleLabel(vehicle!)} · ${modelLabel(s.vehicle(vehicle!).model)}',
+            vehiclePickerLabel(s.vehicle(vehicle!)),
             style: const TextStyle(fontWeight: FontWeight.w700),
           )
         else ...[
@@ -763,26 +759,10 @@ class _VisionState extends ConsumerState<VisionScreen>
               for (final v in s.vehicles)
                 DropdownMenuItem(
                   value: v.id,
-                  child: Text('${vehicleLabel(v.id)} · ${modelLabel(v.model)}'),
+                  child: Text(vehiclePickerLabel(v)),
                 ),
             ],
             onChanged: (v) => setState(() => vehicle = v),
-          ),
-        ],
-        if (widget.front) ...[
-          const SizedBox(height: 16),
-          const Text('촬영할 부위'),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              for (final part in widget.inspectionArea!.parts)
-                ChoiceChip(
-                  label: Text(part.label),
-                  selected: frontPart == part,
-                  onSelected: (_) => setState(() => frontPart = part),
-                ),
-            ],
           ),
         ],
         if (!widget.front) ...[
@@ -859,6 +839,7 @@ class _VisionState extends ConsumerState<VisionScreen>
             store.inspections.where((record) => record.vehicleId == vehicle),
           );
     final modelSupported =
+        !widget.front &&
         inspectionArea == FrontInspectionArea.exterior &&
         [
           '렉스턴 스포츠',
@@ -1087,258 +1068,76 @@ class _VisionState extends ConsumerState<VisionScreen>
                   ],
                 ],
               ),
-              Panel(
-                title: inspectionArea == null ? '촬영 안내' : '촬영할 부위',
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    if (inspectionArea != null) ...[
-                      InspectionDiagram(
-                        area: inspectionArea,
-                        observations: latest,
-                        selected: liveParts.containsKey(frontPart)
-                            ? frontPart
-                            : null,
+              if (!widget.front)
+                Panel(
+                  title: '촬영 안내',
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Text(
+                        engineBay
+                            ? '엔진룸 전체가 틀 안에 들어오게 맞추세요.'
+                            : widget.front
+                            ? '보닛부터 앞범퍼까지 틀 안에 넣으세요.'
+                            : '점검할 차량이나 부품을 틀 안에 넣으세요.',
                       ),
-                      const SizedBox(height: 10),
-                    ],
-                    Text(
-                      engineBay
-                          ? '엔진룸 전체가 틀 안에 들어오게 맞추세요.'
-                          : widget.front
-                          ? '보닛부터 앞범퍼까지 틀 안에 넣으세요.'
-                          : '점검할 차량이나 부품을 틀 안에 넣으세요.',
-                    ),
-                    if (engineBay) ...[
-                      const SizedBox(height: 8),
-                      const Text('엔진룸은 촬영한 사진에서 부위를 직접 표시해 주세요.'),
-                    ],
-                    if (modelSupported && !modelInstalled) ...[
-                      const SizedBox(height: 8),
-                      const Text('부위 분석 모델을 준비한 뒤 화면 분석을 사용할 수 있어요.'),
-                    ],
-                    if (liveFrame != null) ...[
-                      const SizedBox(height: 12),
-                      const Text(
-                        '이번 장면',
-                        style: TextStyle(fontWeight: FontWeight.w800),
-                      ),
-                      for (final part in FrontInspectionArea.exterior.parts)
-                        if (liveParts[part] case final result?)
-                          TextButton(
-                            onPressed: () => setState(() => frontPart = part),
-                            child: Text('${part.label} · ${result.scoreLabel}'),
-                          )
-                        else
+                      if (engineBay) ...[
+                        const SizedBox(height: 8),
+                        const Text('엔진룸은 촬영한 사진에서 부위를 직접 표시해 주세요.'),
+                      ],
+                      if (modelSupported && !modelInstalled) ...[
+                        const SizedBox(height: 8),
+                        const Text('부위 분석 모델을 준비한 뒤 화면 분석을 사용할 수 있어요.'),
+                      ],
+                      if (liveFrame != null) ...[
+                        const SizedBox(height: 12),
+                        const Text(
+                          '이번 장면',
+                          style: TextStyle(fontWeight: FontWeight.w800),
+                        ),
+                        for (final part in FrontInspectionArea.exterior.parts)
+                          if (liveParts[part] case final result?)
+                            TextButton(
+                              onPressed: () => setState(() => frontPart = part),
+                              child: Text(
+                                '${part.label} · ${result.scoreLabel}',
+                              ),
+                            )
+                          else
+                            Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 5),
+                              child: Text(
+                                '${part.label} · 미인식',
+                                style: const TextStyle(color: muted),
+                              ),
+                            ),
+                        const Text(
+                          '인식 점수는 부품의 특징과 얼마나 가까운지 나타냅니다. 고장 확률이나 실제 정확도는 아닙니다.',
+                          style: TextStyle(fontSize: 12, color: muted),
+                        ),
+                      ],
+                      if (liveParts.isNotEmpty) ...[
+                        const SizedBox(height: 8),
+                        const Text('찾은 위치는 부위 후보입니다. 상태는 사진을 저장한 뒤 확인해 주세요.'),
+                      ],
+                      if (inspectionArea != null) ...[
+                        const SizedBox(height: 12),
+                        const Text(
+                          '마지막 저장 상태',
+                          style: TextStyle(fontWeight: FontWeight.w800),
+                        ),
+                        const SizedBox(height: 6),
+                        for (final part in inspectionArea.parts)
                           Padding(
-                            padding: const EdgeInsets.symmetric(vertical: 5),
+                            padding: const EdgeInsets.only(bottom: 4),
                             child: Text(
-                              '${part.label} · 미인식',
-                              style: const TextStyle(color: muted),
+                              '${part.number}. ${part.label} · ${latest[part]?.status.label ?? '미점검'}',
                             ),
                           ),
-                      const Text(
-                        '인식 점수는 부품의 특징과 얼마나 가까운지 나타냅니다. 고장 확률이나 실제 정확도는 아닙니다.',
-                        style: TextStyle(fontSize: 12, color: muted),
-                      ),
+                      ],
                     ],
-                    if (liveParts.isNotEmpty) ...[
-                      const SizedBox(height: 8),
-                      const Text('찾은 위치는 부위 후보입니다. 상태는 사진을 저장한 뒤 확인해 주세요.'),
-                    ],
-                    if (inspectionArea != null) ...[
-                      const SizedBox(height: 12),
-                      const Text(
-                        '마지막 저장 상태',
-                        style: TextStyle(fontWeight: FontWeight.w800),
-                      ),
-                      const SizedBox(height: 6),
-                      for (final part in inspectionArea.parts)
-                        Padding(
-                          padding: const EdgeInsets.only(bottom: 4),
-                          child: Text(
-                            '${part.number}. ${part.label} · ${latest[part]?.status.label ?? '미점검'}',
-                          ),
-                        ),
-                    ],
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _frontResult() {
-    final parts = widget.inspectionArea!.parts;
-    final current = frontObservations[frontPart];
-    final proposal = current == null ? frontProposals[frontPart] : null;
-    final x = current?.x ?? proposal?.x;
-    final y = current?.y ?? proposal?.y;
-    return Panel(
-      title: '기록한 부위 ${frontObservations.length} / ${parts.length}',
-      subtitle: engineBay
-          ? '부위를 고른 뒤 사진에서 위치를 눌러 주세요.'
-          : '좌우는 운전석에서 앞을 볼 때 기준입니다.',
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              for (final part in parts)
-                ChoiceChip(
-                  label: Text(
-                    '${part.number}. ${part.label}'
-                    '${frontObservations.containsKey(part)
-                        ? ' ✓'
-                        : frontProposals.containsKey(part)
-                        ? ' · 후보'
-                        : ''}',
                   ),
-                  selected: frontPart == part,
-                  onSelected: saving
-                      ? null
-                      : (_) => setState(() => frontPart = part),
                 ),
-            ],
-          ),
-          if (findingParts)
-            const Text('사진에서 부위를 찾고 있어요.')
-          else if (frontProposalMessage != null)
-            Text(frontProposalMessage!),
-          if (proposal != null) ...[
-            const SizedBox(height: 8),
-            Text('${frontPart.label} · ${proposal.scoreLabel}'),
-            const Text(
-              '인식 점수는 부품의 특징과 가까운 정도입니다. 고장 확률은 아닙니다.',
-              style: TextStyle(fontSize: 12, color: muted),
-            ),
-          ],
-          const SizedBox(height: 12),
-          FrontPhoto(
-            path: imagePath!,
-            observations: frontObservations,
-            vehicleDetection: frontVehicleDetection,
-            proposals: frontProposals,
-            onMark: saving
-                ? null
-                : (offset) => setState(() {
-                    frontObservations[frontPart] = FrontObservation(
-                      current?.status == FrontCheck.checked
-                          ? FrontCheck.checked
-                          : FrontCheck.review,
-                      x: offset.dx,
-                      y: offset.dy,
-                    );
-                  }),
-          ),
-          const SizedBox(height: 12),
-          Text(
-            '${frontPart.label} · ${current?.status.label ?? (proposal == null ? '사진에서 위치를 눌러 주세요' : '후보 위치 확인')}',
-            style: const TextStyle(fontWeight: FontWeight.w700),
-          ),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              for (final status in FrontCheck.values)
-                ChoiceChip(
-                  label: Text(status.label),
-                  selected: current?.status == status,
-                  onSelected:
-                      saving || (status != FrontCheck.hidden && x == null)
-                      ? null
-                      : (_) => setState(() {
-                          frontObservations[frontPart] =
-                              status == FrontCheck.hidden
-                              ? const FrontObservation(FrontCheck.hidden)
-                              : FrontObservation(status, x: x, y: y);
-                        }),
-                ),
-              if (current != null)
-                TextButton(
-                  onPressed: saving
-                      ? null
-                      : () =>
-                            setState(() => frontObservations.remove(frontPart)),
-                  child: const Text('이 부위 기록 지우기'),
-                ),
-            ],
-          ),
-          if (engineBay)
-            Align(
-              alignment: Alignment.centerLeft,
-              child: TextButton.icon(
-                onPressed: () => context.push(
-                  Uri(
-                    path: '/manual-search',
-                    queryParameters: {'query': frontPart.searchTerm},
-                  ).toString(),
-                ),
-                icon: const Icon(Icons.menu_book_outlined),
-                label: const Text('관련 책자'),
-              ),
-            ),
-          if (!engineBay &&
-              ref
-                  .watch(adaptiveRuntimeProvider)
-                  .installedModels
-                  .any((model) => model.id == 'ssd-mobilenet-int8-public-v1'))
-            Align(
-              alignment: Alignment.centerLeft,
-              child: OutlinedButton.icon(
-                onPressed: saving || findingVehicle || findingParts
-                    ? null
-                    : findVehicleInPhoto,
-                icon: const Icon(Icons.center_focus_weak),
-                label: Text(findingVehicle ? '차량을 찾는 중…' : '사진에서 차량 찾기'),
-              ),
-            ),
-          if (vehicleDetectionMessage != null) Text(vehicleDetectionMessage!),
-          audioControls(),
-          const SizedBox(height: 16),
-          TextField(
-            controller: annotation,
-            enabled: !saving,
-            minLines: 1,
-            maxLines: 3,
-            maxLength: 10000,
-            decoration: const InputDecoration(
-              labelText: '메모 (선택)',
-              counterText: '',
-            ),
-          ),
-          const SizedBox(height: 12),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              OutlinedButton(
-                onPressed: saving || recording || findingVehicle
-                    ? null
-                    : () {
-                        setState(() {
-                          step = 2;
-                          findingParts = false;
-                        });
-                        startCamera();
-                      },
-                child: const Text('다시 촬영'),
-              ),
-              FilledButton(
-                onPressed:
-                    saving ||
-                        recording ||
-                        findingVehicle ||
-                        frontObservations.isEmpty
-                    ? null
-                    : save,
-                child: Text(saving ? '저장 중…' : '점검 저장'),
-              ),
             ],
           ),
         ],
@@ -1346,47 +1145,71 @@ class _VisionState extends ConsumerState<VisionScreen>
     );
   }
 
-  Widget _result() => Panel(
-    title: '촬영 결과 · 수동 점검',
+  Widget _frontResult() => Panel(
+    title: '사진 확인 및 기록',
+    subtitle: '사진을 누르면 마크가 추가됩니다. 마크를 다시 누르면 삭제됩니다.',
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        ResponsiveColumns(
-          flexes: const [2, 1],
+        FrontPhoto(
+          path: imagePath!,
+          observations: const {},
+          marks: photoMarks,
+          onMark: saving || recording
+              ? null
+              : (offset) => setState(() {
+                  if (photoMarks.length < 100) {
+                    photoMarks.add(PhotoMark(offset.dx, offset.dy));
+                  }
+                }),
+          onRemoveMark: saving || recording
+              ? null
+              : (index) => setState(() => photoMarks.removeAt(index)),
+        ),
+        const SizedBox(height: 12),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          crossAxisAlignment: WrapCrossAlignment.center,
           children: [
-            if (imagePath != null)
-              AspectRatio(
-                aspectRatio: 4 / 3,
-                child: Image.file(File(imagePath!), fit: BoxFit.contain),
-              ),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                note(
-                  '수동 지정 부품: ${standardPart(area)} · 영상 자동 인식 없음',
-                  color: Colors.orange,
-                ),
-                audioControls(),
-                const SizedBox(height: 18),
-                TextField(
-                  controller: annotation,
-                  maxLines: 6,
-                  decoration: const InputDecoration(
-                    labelText: '점검 메모',
-                    hintText: '점검 부위, 관찰한 상태, 후속 조치 등을 입력',
-                  ),
-                ),
-              ],
+            Text('마크 ${photoMarks.length}개 / 100개'),
+            TextButton.icon(
+              onPressed: saving || recording || photoMarks.isEmpty
+                  ? null
+                  : () => setState(() => photoMarks.removeLast()),
+              icon: const Icon(Icons.undo),
+              label: const Text('마지막 마크 취소'),
+            ),
+            TextButton(
+              onPressed: saving || recording || photoMarks.isEmpty
+                  ? null
+                  : () => setState(photoMarks.clear),
+              child: const Text('마크 모두 지우기'),
             ),
           ],
         ),
-        const SizedBox(height: 18),
+        const SizedBox(height: 8),
+        TextField(
+          controller: annotation,
+          enabled: !saving,
+          minLines: 2,
+          maxLines: 4,
+          maxLength: 10000,
+          decoration: const InputDecoration(
+            labelText: '점검 메모',
+            hintText: '예: 1번 위치 오염, 2번 위치 누유 흔적 확인',
+            counterText: '',
+          ),
+        ),
+        const SizedBox(height: 8),
+        audioControls(),
+        const SizedBox(height: 12),
         Wrap(
-          spacing: 12,
-          runSpacing: 12,
+          spacing: 8,
+          runSpacing: 8,
           children: [
             OutlinedButton(
-              onPressed: recording
+              onPressed: saving || recording
                   ? null
                   : () {
                       setState(() => step = 2);
@@ -1396,13 +1219,14 @@ class _VisionState extends ConsumerState<VisionScreen>
             ),
             FilledButton(
               onPressed: saving || recording ? null : save,
-              child: Text(saving ? '저장 중…' : '사진 기록 저장'),
+              child: Text(saving ? '저장 중…' : '사진·점검 기록 저장'),
             ),
           ],
         ),
       ],
     ),
   );
+
   Widget _sessions(AppStore s) {
     final records = s.inspections.where((i) => i.vehicleId == vehicle).toList();
     final selected =
@@ -1464,11 +1288,7 @@ class _VisionState extends ConsumerState<VisionScreen>
                                           color: muted,
                                         ),
                                         cell(
-                                          i.vision == null
-                                              ? '수동 점검 · AI 미판정'
-                                              : i.confirmedConceptId == null
-                                              ? '사진 확인 · 부품 미선택'
-                                              : '사진 확인 · 부품 선택 완료',
+                                          '사진 기록 · 마크 ${i.displayMarks.length}개',
                                           color: muted,
                                         ),
                                       ],
@@ -1485,7 +1305,8 @@ class _VisionState extends ConsumerState<VisionScreen>
         ),
         if (selected != null) ...[
           const SizedBox(height: 16),
-          if (selected.front.isEmpty &&
+          if (selected.mode != '전체 사진 점검' &&
+              selected.front.isEmpty &&
               ref
                   .watch(adaptiveRuntimeProvider)
                   .installedModels
@@ -1509,18 +1330,13 @@ class _VisionState extends ConsumerState<VisionScreen>
                   Text('녹음 부위 · ${selected.audioPart}'),
                 if (selected.audioPath case final path?)
                   InspectionAudioPlayback(path, key: ValueKey(path)),
-                if (selected.front.isNotEmpty) ...[
-                  const SizedBox(height: 12),
-                  FrontPhoto(
-                    path: selected.imagePath,
-                    observations: selected.front,
-                  ),
-                  for (final part in FrontPart.values)
-                    if (selected.front[part] case final observation?)
-                      Text(
-                        '${part.number}. ${part.label} · ${observation.status.label}',
-                      ),
-                ],
+                const SizedBox(height: 12),
+                FrontPhoto(
+                  path: selected.imagePath,
+                  observations: const {},
+                  marks: selected.displayMarks,
+                ),
+                Text('마크 ${selected.displayMarks.length}개'),
                 const SizedBox(height: 18),
                 Wrap(
                   spacing: 12,

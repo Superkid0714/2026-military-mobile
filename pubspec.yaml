@@ -26,6 +26,8 @@ dev_dependencies:
 flutter:
   uses-material-design: true
   assets:
+    - assets/branding/military-front-reference.png
+    - assets/branding/military-engine-bay.png
     - assets/branding/jungbion-vehicle-logo.png
     - assets/branding/jungbion-guide.png
     - assets/branding/jungbion-female-guide.png
